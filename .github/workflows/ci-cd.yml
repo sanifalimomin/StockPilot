@@ -1,0 +1,189 @@
+name: CI/CD
+
+# Triggered on every push and pull request targeting main.
+# - test/build jobs run on PRs and pushes (fast feedback, branch protection gate)
+# - image build/push + ECS deploy run ONLY on push to main (post-merge)
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel an in-flight run for the same ref when a newer commit arrives.
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  AWS_REGION: us-east-1            # repo variable override: vars.AWS_REGION
+  JAVA_VERSION: "21"
+  NODE_VERSION: "20"
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Backend unit/integration tests (Spring Boot / Gradle)
+  # ---------------------------------------------------------------------------
+  backend-test:
+    name: Backend tests (JDK 21 / Gradle)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21 (Temurin) with Gradle cache
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Run tests
+        run: ./gradlew --no-daemon test
+
+  # ---------------------------------------------------------------------------
+  # 2. Frontend build (React + Vite + TypeScript)
+  # ---------------------------------------------------------------------------
+  frontend-build:
+    name: Frontend build (Node 20)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20 with npm cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # 3. Build the ARM64/Graviton image and push to ECR.
+  #    Runs only on push to main, gated on green tests + frontend build.
+  #
+  #    AUTH NOTE: We authenticate with AWS Academy Learner Lab *session
+  #    credentials* (access key + secret + session token), stored as GitHub
+  #    secrets and refreshed each lab session (~4h expiry). In production the
+  #    correct approach is GitHub OIDC federation (no long-lived secrets), but
+  #    that requires creating an IAM OIDC provider + roles, which the Learner
+  #    Lab forbids. See docs/DECISIONS.md (ADR-0006).
+  # ---------------------------------------------------------------------------
+  build-and-push:
+    name: Build & push image to ECR
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (Learner Lab session creds)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Compute image reference
+        id: image
+        run: |
+          REGISTRY="${{ steps.ecr.outputs.registry }}"
+          REPO="${{ vars.ECR_REPOSITORY || 'ims-dev-app' }}"
+          echo "registry=$REGISTRY"             >> "$GITHUB_OUTPUT"
+          echo "repo=$REPO"                      >> "$GITHUB_OUTPUT"
+          echo "image=$REGISTRY/$REPO:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build & push ARM64 image (git SHA + latest)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          file: ./app/Dockerfile
+          platforms: linux/arm64           # Graviton runtime
+          push: true
+          provenance: false                # ECR does not accept the OCI provenance manifest
+          tags: |
+            ${{ steps.image.outputs.registry }}/${{ steps.image.outputs.repo }}:${{ github.sha }}
+            ${{ steps.image.outputs.registry }}/${{ steps.image.outputs.repo }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # 4. Deploy: render a new ECS task definition with the freshly pushed image
+  #    and force a new deployment of the Fargate service.
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to ECS Fargate
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (Learner Lab session creds)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
+
+      - name: Download current task definition
+        env:
+          ECS_SERVICE: ${{ vars.ECS_SERVICE || 'ims-dev-api' }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'ims-dev-cluster' }}
+        run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition \
+            --task-definition "$TASK_DEF_ARN" \
+            --query 'taskDefinition' --output json > task-definition.json
+          echo "Fetched task definition: $TASK_DEF_ARN"
+
+      - name: Render new task definition with the new image
+        id: render
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ vars.ECS_CONTAINER_NAME || 'api' }}
+          image: ${{ needs.build-and-push.outputs.image }}
+
+      - name: Deploy to ECS (register task def + force new deployment, wait for stable)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render.outputs.task-definition }}
+          service: ${{ vars.ECS_SERVICE || 'ims-dev-api' }}
+          cluster: ${{ vars.ECS_CLUSTER || 'ims-dev-cluster' }}
+          force-new-deployment: true
+          wait-for-service-stability: true

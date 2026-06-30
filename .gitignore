@@ -1,0 +1,28 @@
+# --- Excluded by request ---
+docs/
+PROJECT_PLAN.md
+*.pdf
+.claude/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# --- Node / build (belt-and-suspenders; also covered per-subdir) ---
+node_modules/
+dist/
+build/
+.gradle/
+
+# --- Secrets / local env ---
+.env
+*.local
+
+# --- Terraform (also covered in infra/.gitignore) ---
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars

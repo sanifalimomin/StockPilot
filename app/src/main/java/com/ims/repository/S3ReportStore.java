@@ -1,0 +1,55 @@
+package com.ims.repository;
+
+import com.ims.config.ImsProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.stereotype.Component;
+import software.amazon.awssdk.core.sync.RequestBody;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/** Uploads reports to S3 for prod. */
+@Component
+@ConditionalOnProperty(name = "ims.aws.enabled", havingValue = "true", matchIfMissing = true)
+public class S3ReportStore implements ReportStore {
+
+    private static final String PREFIX = "reports/";
+
+    private final S3Client s3;
+    private final String bucket;
+
+    public S3ReportStore(S3Client s3, ImsProperties props) {
+        this.s3 = s3;
+        this.bucket = props.getAws().getS3().getBucket();
+    }
+
+    @Override
+    public String store(String reportId, String filename, byte[] content) {
+        String key = PREFIX + reportId + "-" + filename;
+        s3.putObject(PutObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(key)
+                        .contentType("text/csv")
+                        .build(),
+                RequestBody.fromBytes(content));
+        return "s3://" + bucket + "/" + key;
+    }
+
+    @Override
+    public List<ReportDescriptor> list() {
+        List<ReportDescriptor> result = new ArrayList<>();
+        var res = s3.listObjectsV2(ListObjectsV2Request.builder()
+                .bucket(bucket)
+                .prefix(PREFIX)
+                .build());
+        res.contents().forEach(obj -> {
+            String name = obj.key().substring(PREFIX.length());
+            String reportId = name.contains("-") ? name.substring(0, name.indexOf('-')) : name;
+            result.add(new ReportDescriptor(reportId, "s3://" + bucket + "/" + obj.key(), obj.size()));
+        });
+        return result;
+    }
+}

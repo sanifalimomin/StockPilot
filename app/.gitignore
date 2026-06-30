@@ -1,0 +1,17 @@
+# Gradle
+.gradle/
+build/
+
+# Stale Maven output (project migrated to Gradle)
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Local report exports
+reports/
+
+# OS
+.DS_Store
