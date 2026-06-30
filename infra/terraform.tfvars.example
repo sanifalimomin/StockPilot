@@ -1,0 +1,47 @@
+# =============================================================================
+# terraform.tfvars.example
+# Copy to terraform.tfvars and fill in. NEVER commit the real terraform.tfvars
+# (it contains the DB password). Add terraform.tfvars to .gitignore.
+# =============================================================================
+
+project_name = "ims"
+environment  = "dev"
+region       = "us-east-1"
+
+# ---- Networking (defaults are usually fine) ------------------------------- #
+# vpc_cidr             = "10.20.0.0/16"
+# azs                  = ["us-east-1a", "us-east-1b"]
+# public_subnet_cidrs  = ["10.20.0.0/24", "10.20.1.0/24"]
+# private_subnet_cidrs = ["10.20.10.0/24", "10.20.11.0/24"]
+
+# ---- Container image ------------------------------------------------------- #
+# Leave empty on the very first apply (no image pushed yet). CI/CD then sets
+# this to "<ecr_repo_url>:<git-sha>" on each deploy.
+container_image = ""
+
+# ---- Database — REQUIRED -------------------------------------------------- #
+db_name     = "ims"
+db_username = "ims_admin"
+db_password = "CHANGE_ME_use_a_strong_password" # SENSITIVE — keep out of git
+
+# Reliability vs cost: keep single-AZ for cheap lab runs; flip to true for the
+# "99.9% availability" Well-Architected story / demo.
+db_multi_az              = false
+db_backup_retention_days = 7
+
+# ---- Cache ---------------------------------------------------------------- #
+redis_multi_az = false
+
+# ---- Scaling -------------------------------------------------------------- #
+api_desired_count    = 2
+api_min_count        = 2
+api_max_count        = 10
+worker_desired_count = 1
+
+# ---- Alerts --------------------------------------------------------------- #
+# SNS sends a confirmation email you must click. Leave empty to skip.
+alert_email = "sanifalimomin@gmail.com"
+
+# ---- Security ------------------------------------------------------------- #
+enable_waf     = true
+waf_rate_limit = 2000

@@ -1,0 +1,14 @@
+# Terraform working files — never commit
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Secrets / local var files
+terraform.tfvars
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

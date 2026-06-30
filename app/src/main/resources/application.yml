@@ -1,0 +1,85 @@
+spring:
+  application:
+    name: inventory-management-system
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:prod}
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/ims}
+    username: ${DB_USERNAME:ims}
+    password: ${DB_PASSWORD:ims}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # ElastiCache has transit_encryption_enabled=true, so the client MUST use
+      # TLS; a plaintext connection hangs on the handshake. On by default for the
+      # deployed env; local uses cache.type=none so this is never exercised.
+      ssl:
+        enabled: ${REDIS_SSL:true}
+      # Fail fast rather than hang for ~30s if Redis is unreachable.
+      timeout: 2000ms
+      connect-timeout: 2000ms
+  cache:
+    type: redis
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+ims:
+  # Infra injects APP_ROLE (api/worker); accept it first, then IMS_ROLE alias.
+  role: ${APP_ROLE:${IMS_ROLE:API}}  # API | WORKER | SCHEDULER | ALL
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:5173}
+  aws:
+    region: ${AWS_REGION:us-east-1}
+    enabled: true
+    dynamodb:
+      # Infra injects DYNAMODB_TABLE; accept it first, then DDB_TABLE alias.
+      table: ${DYNAMODB_TABLE:${DDB_TABLE:ims-stock-movements}}
+      endpoint: ${DDB_ENDPOINT:}
+    sqs:
+      enabled: ${SQS_ENABLED:true}
+      queue-url: ${SQS_QUEUE_URL:}
+    sns:
+      enabled: ${SNS_ENABLED:true}
+      topic-arn: ${SNS_TOPIC_ARN:}
+    s3:
+      # Infra injects the provisioned bucket as REPORTS_BUCKET; accept S3_BUCKET
+      # as an alias. The literal fallback only applies for local runs.
+      bucket: ${REPORTS_BUCKET:${S3_BUCKET:ims-reports}}
+  reports:
+    local-dir: ${REPORTS_DIR:./reports}
+  forecast:
+    provider: ${FORECAST_PROVIDER:ewma}   # ewma | bedrock
+    bedrock-model-id: ${BEDROCK_MODEL_ID:anthropic.claude-3-haiku-20240307-v1:0}
+  reorder:
+    cron: ${REORDER_CRON:0 0 * * * *}
+
+logging:
+  level:
+    com.ims: INFO
