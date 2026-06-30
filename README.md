@@ -7,10 +7,6 @@ EventBridge, WAF, and CloudWatch/X-Ray — provisioned entirely with Terraform a
 delivered by a GitHub Actions CI/CD pipeline, within the constraints of the
 AWS Academy Learner Lab.
 
-> Full planning, rubric mapping, and the execution plan are in
-> [`PROJECT_PLAN.md`](PROJECT_PLAN.md). This README is the developer-facing
-> overview and quickstart.
-
 ---
 
 ## Architecture summary
@@ -20,9 +16,7 @@ routed to the **Spring Boot API on ECS Fargate** (private subnets), which reads
 hot data from **Redis**, persists to **RDS PostgreSQL**, and enqueues stock
 movements onto **SQS**. A **worker** drains SQS, updates RDS plus an append-only
 **DynamoDB ledger**, and publishes low-stock alerts to **SNS**. A scheduled
-**EventBridge** job runs nightly reorder evaluation. See
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full narrative, protocols,
-and sequence diagram.
+**EventBridge** job runs nightly reorder evaluation.
 
 ```mermaid
 flowchart TB
@@ -109,9 +103,7 @@ InventoryManagementSystem/
 ├── .github/workflows/
 │   ├── ci-cd.yml             # test -> build ARM64 image -> push ECR -> deploy ECS
 │   └── terraform.yml         # fmt -check + validate on infra/ PRs
-├── docs/                     # architecture, well-architected, decisions, runbook, diagrams
-├── README.md                 # this file
-└── PROJECT_PLAN.md           # full plan + rubric mapping
+└── README.md                 # this file
 ```
 
 ---
@@ -129,21 +121,24 @@ InventoryManagementSystem/
 
 ## Local development quickstart
 
-No AWS account is needed to run the app locally — use the `local` profile and
-the frontend's mock mode.
+The backend's `local` profile runs entirely in-memory (H2 database, AWS
+integrations disabled), so no AWS account is needed to run it.
 
-**Backend (mock/local profile):**
+**Backend (local profile):**
 ```bash
 cd app
 ./gradlew bootRun --args='--spring.profiles.active=local'
 # API on http://localhost:8080, health at /api/v1/health
 ```
 
-**Frontend (mock mode, talks to local API or stubs):**
+**Frontend:** the frontend always talks to a real API over `/api/v1`. The Vite
+dev server proxies `/api` to `VITE_API_TARGET` (set in `frontend/.env`; defaults
+to a local backend at `http://localhost:8080`, or point it at a deployed ALB).
 ```bash
 cd frontend
+cp .env.example .env     # then edit VITE_API_TARGET if needed
 npm ci
-npm run dev     # Vite dev server (mock mode)
+npm run dev              # Vite dev server on http://localhost:5173
 ```
 
 **Run the test suites:**
@@ -154,48 +149,98 @@ cd frontend && npm ci && npm run build
 
 ---
 
-## Deploying to AWS
+## Deploying to AWS (Learner Lab)
 
-All infrastructure is Terraform; the app is delivered by CI/CD. Full
-step-by-step instructions for the Learner Lab — bootstrap remote state,
-provision the platform, build/push the image, deploy, and verify — plus a
-per-service Learner Lab availability check, are in
-**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. Operational procedures (rollback,
-teardown, failure scenarios) are in [docs/RUNBOOK.md](docs/RUNBOOK.md).
+All infrastructure is Terraform; the application image is built and deployed to
+ECS. The steps below are self-contained. Region is pinned to `us-east-1`. The
+`LabRole` is auto-discovered by Terraform, so you never supply IAM ARNs.
 
-The short version:
+### 1. Refresh Learner Lab credentials (each session, ~4h expiry)
 
-1. Refresh Learner Lab session credentials (expire ~4h).
-2. `cd infra/bootstrap && terraform apply` — creates the S3 state bucket + lock table (once).
-3. `cd infra && terraform apply` — VPC, ALB, ECS, RDS, DynamoDB, Redis, SQS/SNS, ECR, ...
-4. Push the ARM64 image to ECR (via CI/CD on merge to `main`, or manually) and
-   force a new ECS deployment.
+Start the lab → **AWS Details → AWS CLI** → copy the three values:
 
-> **Learner Lab note:** session credentials expire (~4h) and the lab forbids
-> creating IAM roles, so we reuse `LabRole` and store session creds as GitHub
-> secrets. GitHub OIDC is the production approach; see
-> [docs/DECISIONS.md](docs/DECISIONS.md) (ADR-0006).
+```bash
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...          # mandatory for Learner Lab
+export AWS_REGION=us-east-1
+aws sts get-caller-identity            # verify
+```
 
----
+### 2. Bootstrap remote state (run once, ever)
 
-## Documentation
+```bash
+cd infra/bootstrap
+terraform init
+terraform apply -var="state_bucket_name=ims-tf-state-<YOUR_ACCOUNT_ID>"
+```
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — components, boundaries, data flows, diagrams, sequence narrative
-- [docs/WELL_ARCHITECTED.md](docs/WELL_ARCHITECTED.md) — six pillars + trade-offs
-- [docs/DECISIONS.md](docs/DECISIONS.md) — ADR log (locked + open decisions)
-- [docs/RUNBOOK.md](docs/RUNBOOK.md) — deploy, rollback, creds refresh, teardown, failure scenarios, demo script
-- [docs/README.md](docs/README.md) — documentation index
+Then set the `bucket` line in `infra/backend.tf` to the exact name you used.
 
----
+### 3. Configure variables
 
-## AI-usage disclosure
+```bash
+cd ../            # into infra/
+cp terraform.tfvars.example terraform.tfvars
+# edit terraform.tfvars: set a real db_password; keep db_multi_az/redis_multi_az
+# false for a cheap lab run; leave container_image empty on the first apply.
+```
 
-Generative AI tools (Anthropic Claude) were used as a development assistant on
-this project — for scaffolding the CI/CD workflows and documentation, drafting
-architecture/decision narratives, and reviewing configuration. All AI-assisted
-output was reviewed, edited, and validated by the author, who is responsible for
-the final design decisions, code, and submitted report. Architectural choices
-and their trade-offs reflect the author's own analysis against the course rubric
-and the Learner Lab constraints. The optional in-product AI demand-forecast
-feature (Bedrock with a statistical fallback) is a separate runtime feature of
-the system and is documented in [docs/DECISIONS.md](docs/DECISIONS.md) (ADR-0007).
+### 4. Provision the platform
+
+```bash
+terraform init          # initialises the S3 backend from step 2
+terraform apply         # VPC, ALB, ECS, RDS, DynamoDB, Redis, SQS/SNS, ECR, WAF
+terraform output        # note ecr_repo_url and alb_dns_name
+```
+
+The ECS service starts unhealthy until an image is pushed — that's expected.
+Confirm the SNS subscription email if you set `alert_email`.
+
+### 5. Build & push the image, then deploy
+
+**Option A — CI/CD:** add repo secrets `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, then merge to `main`. The pipeline
+tests, builds the ARM64 image, pushes to ECR, and forces a new ECS deployment.
+
+**Option B — Manual:**
+```bash
+ECR=$(terraform output -raw ecr_repo_url)          # from infra/
+aws ecr get-login-password --region us-east-1 \
+  | docker login --username AWS --password-stdin "${ECR%/*}"
+cd ../app
+docker buildx build --platform linux/arm64 -t "$ECR:latest" --push .
+# names are <project>-<environment>-* (e.g. ims-dev-*); deploy both services:
+aws ecs update-service --cluster ims-dev-cluster --service ims-dev-api    --force-new-deployment --region us-east-1
+aws ecs update-service --cluster ims-dev-cluster --service ims-dev-worker --force-new-deployment --region us-east-1
+```
+
+> On Windows PowerShell, don't pipe `get-login-password` into `docker login`
+> (it corrupts the token); capture it and pass with `--password` instead.
+
+### 6. Verify
+
+```bash
+ALB=$(cd ../infra && terraform output -raw alb_dns_name)
+curl "http://$ALB/api/v1/health"        # expect {"status":"UP",...}
+```
+
+### Teardown (protect the lab budget)
+
+```bash
+# cheap pause: scale services to zero and stop the DB
+aws ecs update-service --cluster ims-dev-cluster --service ims-dev-api    --desired-count 0 --region us-east-1
+aws ecs update-service --cluster ims-dev-cluster --service ims-dev-worker --desired-count 0 --region us-east-1
+aws rds stop-db-instance --db-instance-identifier ims-dev-pg --region us-east-1
+# or full teardown (leave infra/bootstrap in place):
+cd infra && terraform destroy
+```
+
+### Learner Lab notes
+
+- Session credentials expire (~4h). On `ExpiredToken` / `InvalidClientTokenId`,
+  redo step 1 and re-run.
+- The lab forbids creating IAM roles, so the stack reuses the pre-existing
+  `LabRole` for both the ECS execution and task roles (auto-discovered).
+- WAF is sometimes blocked by the lab SCP. It's gated by `enable_waf` — set it
+  to `false` in `terraform.tfvars` if `terraform apply` fails on the web ACL.
