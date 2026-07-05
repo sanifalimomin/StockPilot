@@ -25,12 +25,13 @@ public class LocalReportStore implements ReportStore {
     }
 
     @Override
-    public String store(String reportId, String filename, byte[] content) {
+    public ReportDescriptor store(String reportId, String filename, byte[] content) {
         try {
             Files.createDirectories(dir);
             Path file = dir.resolve(reportId + "-" + filename);
             Files.write(file, content);
-            return file.toAbsolutePath().toString();
+            // No presigned URL concept on the local filesystem.
+            return new ReportDescriptor(reportId, filename, file.toAbsolutePath().toString(), content.length, null);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to write report", e);
         }
@@ -45,9 +46,9 @@ public class LocalReportStore implements ReportStore {
         try (Stream<Path> files = Files.list(dir)) {
             files.filter(Files::isRegularFile).forEach(p -> {
                 try {
-                    String name = p.getFileName().toString();
-                    String reportId = name.contains("-") ? name.substring(0, name.indexOf('-')) : name;
-                    result.add(new ReportDescriptor(reportId, p.toAbsolutePath().toString(), Files.size(p)));
+                    String[] parts = ReportStore.splitStoredName(p.getFileName().toString());
+                    result.add(new ReportDescriptor(
+                            parts[0], parts[1], p.toAbsolutePath().toString(), Files.size(p), null));
                 } catch (IOException ignored) {
                 }
             });

@@ -42,6 +42,14 @@ worker_desired_count = 1
 # SNS sends a confirmation email you must click. Leave empty to skip.
 alert_email = "sanifalimomin@gmail.com"
 
+# ---- AI forecast (optional) ------------------------------------------------ #
+# Bedrock is blocked in the Learner Lab, so the app calls a public AI API
+# directly. Recommended: a FREE Google AI Studio key (aistudio.google.com ->
+# Get API key; no billing account needed). Gemini takes precedence over Claude;
+# leave both empty for the free statistical EWMA forecast.
+# gemini_api_key    = "AIza..."
+# anthropic_api_key = "sk-ant-..."
+
 # ---- Security ------------------------------------------------------------- #
 enable_waf     = true
 waf_rate_limit = 2000

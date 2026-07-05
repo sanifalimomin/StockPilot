@@ -11,6 +11,8 @@
 #   * IAM: execution_role_arn AND task_role_arn both = LabRole ARN. The lab
 #     forbids creating roles, so a single over-privileged role backs both
 #     functions. Production = two scoped least-privilege roles.
+#   * Secrets: DB password + AI API keys come from Secrets Manager via the
+#     container `secrets` block (never plaintext in the task definition).
 #   * Autoscaling: target-tracking on BOTH ECS CPU and ALB request-count-per-
 #     target, 2 -> 10 tasks (matches the 50->200 RPS NFR).
 #   * Security-group chain: this service SG accepts the container port ONLY
@@ -81,6 +83,12 @@ resource "aws_cloudwatch_log_group" "worker" {
   tags              = var.tags
 }
 
+resource "aws_cloudwatch_log_group" "scheduler" {
+  name              = "/ecs/${var.name_prefix}/scheduler"
+  retention_in_days = var.log_retention_days
+  tags              = var.tags
+}
+
 # ---- Shared env vars wired from other modules ----------------------------- #
 locals {
   # Common application environment for BOTH task definitions.
@@ -97,15 +105,32 @@ locals {
     { name = "SQS_QUEUE_URL", value = var.sqs_queue_url },
     { name = "SNS_TOPIC_ARN", value = var.sns_topic_arn },
     { name = "REPORTS_BUCKET", value = var.reports_bucket },
+    { name = "CORS_ORIGINS", value = var.cors_origins },
+    { name = "FORECAST_PROVIDER", value = var.forecast_provider },
   ]
 
-  # SENSITIVE: the DB password is injected as a plain env var here for the lab.
-  # PRODUCTION: store it in Secrets Manager and use the container `secrets`
-  # block so it never appears in the task definition / state in cleartext.
-  secret_environment = [
-    { name = "SPRING_DATASOURCE_PASSWORD", value = var.db_password },
-    { name = "DB_PASSWORD", value = var.db_password },
-  ]
+  # Secrets are injected from Secrets Manager via the ECS `secrets` block
+  # (valueFrom = secret ARN), so they never appear in plaintext in the task
+  # definition. The execution role (LabRole) has secretsmanager:GetSecretValue.
+  container_secrets = concat(
+    var.db_password_secret_arn != "" ? [
+      { name = "SPRING_DATASOURCE_PASSWORD", valueFrom = var.db_password_secret_arn },
+      { name = "DB_PASSWORD", valueFrom = var.db_password_secret_arn },
+    ] : [],
+    var.anthropic_api_key_secret_arn != "" ? [{ name = "ANTHROPIC_API_KEY", valueFrom = var.anthropic_api_key_secret_arn }] : [],
+    var.gemini_api_key_secret_arn != "" ? [{ name = "GEMINI_API_KEY", valueFrom = var.gemini_api_key_secret_arn }] : []
+  )
+
+  # Fallback ONLY when Secrets Manager is disabled (use_secrets_manager=false):
+  # values ride as plain env vars — an acknowledged lab-only degradation.
+  secret_environment = concat(
+    var.db_password_secret_arn == "" ? [
+      { name = "SPRING_DATASOURCE_PASSWORD", value = var.db_password },
+      { name = "DB_PASSWORD", value = var.db_password },
+    ] : [],
+    var.anthropic_api_key_secret_arn == "" && var.anthropic_api_key != "" ? [{ name = "ANTHROPIC_API_KEY", value = var.anthropic_api_key }] : [],
+    var.gemini_api_key_secret_arn == "" && var.gemini_api_key != "" ? [{ name = "GEMINI_API_KEY", value = var.gemini_api_key }] : []
+  )
 }
 
 # ---- API task definition -------------------------------------------------- #
@@ -135,6 +160,7 @@ resource "aws_ecs_task_definition" "api" {
       environment = concat(local.base_environment, local.secret_environment, [
         { name = "APP_ROLE", value = "api" }
       ])
+      secrets = local.container_secrets
       # Container-level health check (belt-and-braces alongside the ALB check).
       healthCheck = {
         command     = ["CMD-SHELL", "curl -f http://localhost:${var.container_port}${var.health_check_path} || exit 1"]
@@ -231,6 +257,7 @@ resource "aws_ecs_task_definition" "worker" {
       environment = concat(local.base_environment, local.secret_environment, [
         { name = "APP_ROLE", value = "worker" } # selects the Spring "worker" profile
       ])
+      secrets = local.container_secrets
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -272,6 +299,81 @@ resource "aws_ecs_service" "worker" {
   depends_on = [aws_ecs_cluster_capacity_providers.this]
 
   tags = merge(var.tags, { Name = "${var.name_prefix}-worker" })
+}
+
+# =============================================================================
+# Scheduled reorder evaluation — EventBridge cron -> one-shot Fargate RunTask.
+#
+# The task runs the same image with APP_ROLE=scheduler: the app performs a
+# single reorder scan and exits (see SchedulerRunner), so nothing stays
+# resident between runs — Cost: pay only for the ~1 minute the scan takes.
+# The web server is disabled for this role; the task is not behind the ALB.
+# =============================================================================
+resource "aws_ecs_task_definition" "scheduler" {
+  family                   = "${var.name_prefix}-scheduler"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = var.scheduler_cpu
+  memory                   = var.scheduler_memory
+  execution_role_arn       = var.execution_role_arn
+  task_role_arn            = var.task_role_arn
+
+  runtime_platform {
+    cpu_architecture        = "ARM64"
+    operating_system_family = "LINUX"
+  }
+
+  container_definitions = jsonencode([
+    {
+      name      = "scheduler"
+      image     = var.container_image # same image as API/worker; pulled fresh per run
+      essential = true
+      environment = concat(local.base_environment, local.secret_environment, [
+        { name = "APP_ROLE", value = "scheduler" },
+        # One-shot batch job: skip the embedded web server so the task exits
+        # cleanly after the scan instead of holding port 8080 open.
+        { name = "SPRING_MAIN_WEB_APPLICATION_TYPE", value = "none" }
+      ])
+      secrets = local.container_secrets
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.scheduler.name
+          "awslogs-region"        = var.region
+          "awslogs-stream-prefix" = "scheduler"
+        }
+      }
+    }
+  ])
+
+  tags = merge(var.tags, { Name = "${var.name_prefix}-scheduler" })
+}
+
+resource "aws_cloudwatch_event_rule" "reorder" {
+  name                = "${var.name_prefix}-reorder-schedule"
+  description         = "Nightly reorder evaluation: EventBridge cron runs the one-shot scheduler task"
+  schedule_expression = var.reorder_schedule_expression
+
+  tags = merge(var.tags, { Name = "${var.name_prefix}-reorder-schedule" })
+}
+
+resource "aws_cloudwatch_event_target" "reorder" {
+  rule     = aws_cloudwatch_event_rule.reorder.name
+  arn      = aws_ecs_cluster.this.arn
+  role_arn = var.events_role_arn # LabRole in the lab (trusts events.amazonaws.com)
+
+  ecs_target {
+    task_definition_arn = aws_ecs_task_definition.scheduler.arn
+    task_count          = 1
+    launch_type         = "FARGATE"
+    platform_version    = "LATEST"
+
+    network_configuration {
+      subnets          = var.private_subnet_ids
+      security_groups  = [aws_security_group.service.id]
+      assign_public_ip = false
+    }
+  }
 }
 
 # =============================================================================

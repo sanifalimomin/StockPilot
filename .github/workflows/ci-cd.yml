@@ -44,7 +44,11 @@ jobs:
           cache: gradle
 
       - name: Run tests
-        run: ./gradlew --no-daemon test
+        # chmod is belt-and-braces: commits made from Windows can lose the
+        # executable bit on gradlew, which breaks the Linux runner (exit 126).
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon test
 
   # ---------------------------------------------------------------------------
   # 2. Frontend build (React + Vite + TypeScript)
@@ -81,7 +85,7 @@ jobs:
   #    secrets and refreshed each lab session (~4h expiry). In production the
   #    correct approach is GitHub OIDC federation (no long-lived secrets), but
   #    that requires creating an IAM OIDC provider + roles, which the Learner
-  #    Lab forbids. See docs/DECISIONS.md (ADR-0006).
+  #    Lab forbids.
   # ---------------------------------------------------------------------------
   build-and-push:
     name: Build & push image to ECR
@@ -135,8 +139,10 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ---------------------------------------------------------------------------
-  # 4. Deploy: render a new ECS task definition with the freshly pushed image
-  #    and force a new deployment of the Fargate service.
+  # 4. Deploy: render new ECS task definitions with the freshly pushed image
+  #    and force new deployments of BOTH Fargate services (API + worker).
+  #    The scheduler task definition pins the :latest tag and is launched fresh
+  #    by EventBridge each night, so it picks up the new image automatically.
   # ---------------------------------------------------------------------------
   deploy:
     name: Deploy to ECS Fargate
@@ -187,3 +193,95 @@ jobs:
           cluster: ${{ vars.ECS_CLUSTER || 'ims-dev-cluster' }}
           force-new-deployment: true
           wait-for-service-stability: true
+
+      # ---- Worker service: same image, own task definition ------------------
+      - name: Download current worker task definition
+        env:
+          ECS_WORKER_SERVICE: ${{ vars.ECS_WORKER_SERVICE || 'ims-dev-worker' }}
+          ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'ims-dev-cluster' }}
+        run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_WORKER_SERVICE" \
+            --query 'services[0].taskDefinition' --output text)
+          aws ecs describe-task-definition \
+            --task-definition "$TASK_DEF_ARN" \
+            --query 'taskDefinition' --output json > worker-task-definition.json
+          echo "Fetched worker task definition: $TASK_DEF_ARN"
+
+      - name: Render worker task definition with the new image
+        id: render-worker
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: worker-task-definition.json
+          container-name: ${{ vars.ECS_WORKER_CONTAINER_NAME || 'worker' }}
+          image: ${{ needs.build-and-push.outputs.image }}
+
+      - name: Deploy worker to ECS (force new deployment, wait for stable)
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-worker.outputs.task-definition }}
+          service: ${{ vars.ECS_WORKER_SERVICE || 'ims-dev-worker' }}
+          cluster: ${{ vars.ECS_CLUSTER || 'ims-dev-cluster' }}
+          force-new-deployment: true
+          wait-for-service-stability: true
+
+  # ---------------------------------------------------------------------------
+  # 5. Deploy the frontend: build the Vite bundle against the deployed ALB and
+  #    sync it to the S3 website bucket (provisioned by Terraform). Runs after
+  #    the API deploy so the site always points at a live, up-to-date API.
+  # ---------------------------------------------------------------------------
+  deploy-frontend:
+    name: Deploy frontend to S3
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20 with npm cache
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Configure AWS credentials (Learner Lab session creds)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
+
+      - name: Resolve API URL and frontend bucket
+        id: targets
+        run: |
+          ALB_DNS=$(aws elbv2 describe-load-balancers \
+            --names "${{ vars.ALB_NAME || 'ims-dev-alb' }}" \
+            --query 'LoadBalancers[0].DNSName' --output text)
+          BUCKET="${{ vars.FRONTEND_BUCKET }}"
+          if [ -z "$BUCKET" ]; then
+            ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            BUCKET="ims-dev-frontend-$ACCOUNT_ID"
+          fi
+          echo "api=http://$ALB_DNS" >> "$GITHUB_OUTPUT"
+          echo "bucket=$BUCKET"      >> "$GITHUB_OUTPUT"
+          echo "Building against http://$ALB_DNS, deploying to s3://$BUCKET"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build with the deployed API baked in
+        env:
+          VITE_API_BASE_URL: ${{ steps.targets.outputs.api }}
+        run: npm run build
+
+      - name: Sync build to the S3 website bucket
+        run: aws s3 sync dist "s3://${{ steps.targets.outputs.bucket }}" --delete

@@ -42,6 +42,21 @@ output "reports_bucket" {
   value       = aws_s3_bucket.reports.bucket
 }
 
+output "frontend_bucket" {
+  description = "S3 bucket the frontend build is synced into (CI/CD or manual `aws s3 sync`)."
+  value       = aws_s3_bucket.frontend.bucket
+}
+
+output "frontend_website_url" {
+  description = "Public S3 website URL serving the React frontend."
+  value       = local.frontend_origin
+}
+
+output "reorder_schedule_rule" {
+  description = "EventBridge rule that runs the nightly one-shot reorder task."
+  value       = module.ecs.reorder_rule_name
+}
+
 output "ecs_cluster_name" {
   description = "ECS cluster name."
   value       = module.ecs.cluster_name

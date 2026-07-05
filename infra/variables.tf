@@ -178,6 +178,13 @@ variable "redis_multi_az" {
   default     = false
 }
 
+# ---- Scheduled reorder pipeline ------------------------------------------- #
+variable "reorder_schedule" {
+  description = "EventBridge schedule expression for the nightly reorder scan (one-shot ECS task)."
+  type        = string
+  default     = "cron(0 2 * * ? *)" # 02:00 UTC daily
+}
+
 # ---- Messaging (SNS) ------------------------------------------------------ #
 variable "alert_email" {
   description = <<-EOT
@@ -188,7 +195,41 @@ variable "alert_email" {
   default     = ""
 }
 
+# ---- AI forecast ------------------------------------------------------------ #
+variable "gemini_api_key" {
+  description = <<-EOT
+    Google AI Studio API key for the Gemini-powered demand forecast. AI Studio
+    keys are FREE (rate-limited free tier, no billing account) — the practical
+    AI option for the Learner Lab, where Bedrock is blocked. Takes precedence
+    over anthropic_api_key. Empty = next provider in line.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "anthropic_api_key" {
+  description = <<-EOT
+    Anthropic API key for the Claude-powered demand forecast (prepaid API
+    credits). Used when gemini_api_key is empty. Leave both empty to use the
+    free statistical EWMA forecast instead.
+  EOT
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 # ---- Security ------------------------------------------------------------- #
+variable "use_secrets_manager" {
+  description = <<-EOT
+    Store the DB password and AI API keys in AWS Secrets Manager and inject them
+    via the ECS task-definition `secrets` block (recommended). Set false only if
+    the lab SCP denies Secrets Manager — falls back to plain container env vars.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "enable_waf" {
   description = "Gate the optional AWS WAF web ACL on the ALB (cost vs protection trade-off)."
   type        = bool

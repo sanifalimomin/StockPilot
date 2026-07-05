@@ -7,7 +7,10 @@ WORKDIR /workspace
 # Cache dependencies: copy the build scripts + wrapper first
 COPY gradlew settings.gradle build.gradle ./
 COPY gradle ./gradle
-RUN chmod +x ./gradlew && ./gradlew --no-daemon dependencies > /dev/null 2>&1 || true
+# Normalize line endings defensively: a Windows checkout can give gradlew CRLF
+# endings, which breaks its shebang inside the Linux container (exit 127).
+RUN sed -i 's/\r$//' gradlew gradle/wrapper/gradle-wrapper.properties \
+    && chmod +x ./gradlew && ./gradlew --no-daemon dependencies > /dev/null 2>&1 || true
 
 # Build the application
 COPY src ./src

@@ -19,10 +19,29 @@ public class ReportController {
         this.service = service;
     }
 
+    /** Generate the full daily set (valuation + low-stock + movement audit). */
+    @PostMapping("/daily")
+    @ResponseStatus(HttpStatus.CREATED)
+    public List<Map<String, String>> daily() {
+        return service.generateDailyReports();
+    }
+
     @PostMapping("/valuation")
     @ResponseStatus(HttpStatus.CREATED)
     public Map<String, String> valuation() {
         return service.generateValuation();
+    }
+
+    @PostMapping("/low-stock")
+    @ResponseStatus(HttpStatus.CREATED)
+    public Map<String, String> lowStock() {
+        return service.generateLowStock();
+    }
+
+    @PostMapping("/movements")
+    @ResponseStatus(HttpStatus.CREATED)
+    public Map<String, String> movements() {
+        return service.generateMovements();
     }
 
     @GetMapping

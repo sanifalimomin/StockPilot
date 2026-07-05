@@ -97,10 +97,16 @@ public class ImsProperties {
     public static class Forecast {
         private String provider = "ewma";
         private String bedrockModelId = "anthropic.claude-3-haiku-20240307-v1:0";
+        private String claudeModel = "claude-opus-4-8";
+        private String geminiModel = "gemini-2.5-flash";
         public String getProvider() { return provider; }
         public void setProvider(String provider) { this.provider = provider; }
         public String getBedrockModelId() { return bedrockModelId; }
         public void setBedrockModelId(String bedrockModelId) { this.bedrockModelId = bedrockModelId; }
+        public String getClaudeModel() { return claudeModel; }
+        public void setClaudeModel(String claudeModel) { this.claudeModel = claudeModel; }
+        public String getGeminiModel() { return geminiModel; }
+        public void setGeminiModel(String geminiModel) { this.geminiModel = geminiModel; }
     }
 
     public static class Reorder {

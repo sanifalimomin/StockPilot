@@ -3,7 +3,7 @@ name: Terraform Validate
 # Lightweight check on PRs that touch infra/. We deliberately do NOT run
 # `terraform plan`/`apply` in CI: the Learner Lab vends session credentials
 # that expire (~4h) and rotate, so applies are run manually from a session
-# with fresh creds (see docs/RUNBOOK.md). This job only needs formatting and
+# with fresh creds (see README.md). This job only needs formatting and
 # static validation, which require no AWS credentials.
 on:
   pull_request:

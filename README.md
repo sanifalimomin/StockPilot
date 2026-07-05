@@ -11,12 +11,13 @@ AWS Academy Learner Lab.
 
 ## Architecture summary
 
-A client request enters over HTTPS through **WAF + ALB** (public subnets), is
-routed to the **Spring Boot API on ECS Fargate** (private subnets), which reads
-hot data from **Redis**, persists to **RDS PostgreSQL**, and enqueues stock
-movements onto **SQS**. A **worker** drains SQS, updates RDS plus an append-only
-**DynamoDB ledger**, and publishes low-stock alerts to **SNS**. A scheduled
-**EventBridge** job runs nightly reorder evaluation.
+The **React frontend is served from an S3 static website**; it calls the API
+through **WAF + ALB** (public subnets), which routes to the **Spring Boot API
+on ECS Fargate** (private subnets). The API reads hot data from **Redis**,
+persists to **RDS PostgreSQL**, and enqueues stock movements onto **SQS**. A
+**worker** drains SQS, updates RDS plus an append-only **DynamoDB ledger**, and
+publishes low-stock alerts to **SNS**. An **EventBridge cron rule** launches a
+**one-shot Fargate task** nightly that runs the reorder evaluation and exits.
 
 ```mermaid
 flowchart TB
@@ -28,9 +29,9 @@ flowchart TB
             alb["ALB (HTTPS 443)"]
         end
         subgraph private["Private subnets (2 AZ)"]
-            api["ECS Fargate API\nSpring Boot + X-Ray\nauto-scale 2 to 10"]
+            api["ECS Fargate API\nSpring Boot\nauto-scale 2 to 10"]
             worker["ECS Fargate Worker\n(Fargate Spot)"]
-            sched["ECS Scheduled Task\nreorder eval"]
+            sched["ECS one-shot task\nreorder eval (exits)"]
             rds[("RDS PostgreSQL\nMulti-AZ")]
             redis[("ElastiCache Redis")]
         end
@@ -40,11 +41,13 @@ flowchart TB
     sqs["SQS (+ DLQ)"]
     sns["SNS topic"]
     s3[("S3\nreports / images")]
+    s3web[("S3 website\nReact frontend")]
     ecr["ECR"]
     eb["EventBridge (cron)"]
     email["Email subscribers"]
 
-    client -->|HTTPS| waf --> alb
+    client -->|static assets| s3web
+    client -->|HTTP| waf --> alb
     alb -->|HTTP 8080| api
     api -->|JDBC 5432| rds
     api -->|RESP 6379| redis
@@ -69,17 +72,17 @@ flowchart TB
 | Layer | Choice |
 |---|---|
 | Backend | Java 21, Spring Boot 3, Gradle, Lombok |
-| Frontend | React + Vite + TypeScript |
+| Frontend | React + Vite + TypeScript, hosted on an S3 static website |
 | Compute | ECS Fargate (ARM64/Graviton) + ALB; Fargate Spot worker |
 | Relational DB | RDS PostgreSQL (Multi-AZ) |
 | NoSQL | DynamoDB (movement ledger) |
 | Cache | ElastiCache Redis |
 | Object store | S3 |
 | Messaging | SQS (+ DLQ) + SNS |
-| Eventing | EventBridge (cron) |
+| Eventing | EventBridge (cron) → one-shot Fargate reorder task |
 | Edge / security | AWS WAF, KMS, SSM Parameter Store / Secrets Manager |
 | Observability | CloudWatch (logs/metrics/alarms/dashboard), X-Ray |
-| AI (optional) | Bedrock with statistical (EWMA) fallback |
+| AI (optional) | Gemini (free AI Studio key) or Claude API demand forecast with statistical (EWMA) fallback; Bedrock variant included (blocked in Learner Lab) |
 | IaC | Terraform (S3 state + DynamoDB lock) |
 | CI/CD | GitHub Actions |
 | Registry | ECR |
@@ -101,7 +104,7 @@ InventoryManagementSystem/
 │   ├── modules/              # vpc, alb, ecs, rds, dynamodb, cache, messaging, observability
 │   └── main.tf  variables.tf  outputs.tf  backend.tf
 ├── .github/workflows/
-│   ├── ci-cd.yml             # test -> build ARM64 image -> push ECR -> deploy ECS
+│   ├── ci-cd.yml             # test -> build ARM64 image -> push ECR -> deploy ECS (api + worker) -> sync frontend to S3
 │   └── terraform.yml         # fmt -check + validate on infra/ PRs
 └── README.md                 # this file
 ```
@@ -150,6 +153,26 @@ cd frontend && npm ci && npm run build
 ---
 
 ## Deploying to AWS (Learner Lab)
+
+### One-command deploy
+
+`scripts/deploy.sh` does everything below in one shot — paste your Learner Lab
+credentials when prompted and it bootstraps the Terraform backend, applies the
+full stack, builds/pushes the ARM64 image, rolls both ECS services, deploys the
+frontend to S3, and waits for the health check. It is idempotent: re-run it
+with fresh credentials after the lab session expires.
+
+```bash
+./scripts/deploy.sh                          # prompts for the AWS CLI creds block
+./scripts/deploy.sh --alert-email you@x.com  # also subscribe SNS low-stock alerts
+./scripts/deploy.sh --destroy                # full teardown (protect lab budget)
+```
+
+Needs: aws CLI v2, Terraform 1.6+, Docker (buildx), Node 20+. On Windows run it
+from **Git Bash**. The generated `infra/terraform.tfvars` (random DB password)
+is gitignored — keep it, later runs reuse it.
+
+### Manual steps
 
 All infrastructure is Terraform; the application image is built and deployed to
 ECS. The steps below are self-contained. Region is pinned to `us-east-1`. The
@@ -201,7 +224,9 @@ Confirm the SNS subscription email if you set `alert_email`.
 
 **Option A — CI/CD:** add repo secrets `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, then merge to `main`. The pipeline
-tests, builds the ARM64 image, pushes to ECR, and forces a new ECS deployment.
+tests, builds the ARM64 image, pushes to ECR, forces new deployments of the
+**api and worker** services, then builds the frontend against the live ALB and
+syncs it to the S3 website bucket.
 
 **Option B — Manual:**
 ```bash
@@ -213,6 +238,14 @@ docker buildx build --platform linux/arm64 -t "$ECR:latest" --push .
 # names are <project>-<environment>-* (e.g. ims-dev-*); deploy both services:
 aws ecs update-service --cluster ims-dev-cluster --service ims-dev-api    --force-new-deployment --region us-east-1
 aws ecs update-service --cluster ims-dev-cluster --service ims-dev-worker --force-new-deployment --region us-east-1
+
+# frontend: build against the ALB, then sync to the website bucket
+cd ../frontend
+ALB=$(cd ../infra && terraform output -raw alb_dns_name)
+BUCKET=$(cd ../infra && terraform output -raw frontend_bucket)
+npm ci
+VITE_API_BASE_URL="http://$ALB" npm run build
+aws s3 sync dist "s3://$BUCKET" --delete
 ```
 
 > On Windows PowerShell, don't pipe `get-login-password` into `docker login`
@@ -223,6 +256,20 @@ aws ecs update-service --cluster ims-dev-cluster --service ims-dev-worker --forc
 ```bash
 ALB=$(cd ../infra && terraform output -raw alb_dns_name)
 curl "http://$ALB/api/v1/health"        # expect {"status":"UP",...}
+cd ../infra && terraform output -raw frontend_website_url   # open in a browser
+```
+
+The nightly reorder scan is an EventBridge rule (`terraform output
+reorder_schedule_rule`) that launches a one-shot Fargate task (02:00 UTC by
+default; tune `reorder_schedule` in tfvars). To demo it without waiting, run
+the same task on demand:
+
+```bash
+aws ecs run-task --cluster ims-dev-cluster \
+  --task-definition ims-dev-scheduler --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[<private-subnet-id>],securityGroups=[<ecs-sg-id>],assignPublicIp=DISABLED}" \
+  --region us-east-1
+# then check the /ecs/ims-dev/scheduler log group for the scan summary
 ```
 
 ### Teardown (protect the lab budget)

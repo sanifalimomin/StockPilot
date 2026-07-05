@@ -7,7 +7,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 /**
- * Scheduled reorder evaluation. Runs when role is SCHEDULER or ALL.
+ * In-process cron reorder evaluation, active only for role ALL (local demo).
+ * In AWS the nightly scan is an EventBridge-triggered one-shot ECS task with
+ * role SCHEDULER instead (see SchedulerRunner), so it needs no always-on task.
  * Cron configured via ims.reorder.cron.
  */
 @Component
@@ -20,8 +22,7 @@ public class ReorderScheduler {
 
     public ReorderScheduler(ReorderService reorderService, ImsProperties props) {
         this.reorderService = reorderService;
-        String role = props.getRole().toUpperCase();
-        this.active = role.equals("SCHEDULER") || role.equals("ALL");
+        this.active = props.getRole().equalsIgnoreCase("ALL");
     }
 
     @Scheduled(cron = "${ims.reorder.cron}")

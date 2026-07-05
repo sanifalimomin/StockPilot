@@ -101,6 +101,28 @@ variable "worker_desired_count" {
   type    = number
   default = 1
 }
+variable "scheduler_cpu" {
+  description = "Fargate CPU units for the one-shot scheduler task."
+  type        = number
+  default     = 256
+}
+variable "scheduler_memory" {
+  description = "Fargate memory (MiB) for the one-shot scheduler task."
+  type        = number
+  default     = 512
+}
+
+# ---- Scheduled reorder task (EventBridge) ---------------------------------- #
+variable "reorder_schedule_expression" {
+  description = "EventBridge schedule expression for the nightly reorder scan."
+  type        = string
+  default     = "cron(0 2 * * ? *)" # 02:00 UTC daily
+}
+
+variable "events_role_arn" {
+  description = "IAM role EventBridge assumes to RunTask on the cluster (= LabRole in the lab)."
+  type        = string
+}
 
 # ---- App configuration (wired from other modules) ------------------------- #
 variable "db_endpoint" {
@@ -137,6 +159,45 @@ variable "sns_topic_arn" {
 }
 variable "reports_bucket" {
   type = string
+}
+variable "cors_origins" {
+  description = "Comma-separated origins allowed by the API's CORS policy (injected as CORS_ORIGINS)."
+  type        = string
+  default     = "http://localhost:5173"
+}
+variable "forecast_provider" {
+  description = "Forecast provider for the app: ewma (free, statistical) or claude (Anthropic API)."
+  type        = string
+  default     = "ewma"
+}
+variable "anthropic_api_key" {
+  description = "Anthropic API key for the Claude forecast provider. Empty = EWMA only."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+variable "gemini_api_key" {
+  description = "Google AI Studio API key for the Gemini forecast provider (free tier). Empty = disabled."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+# ---- Secrets Manager injection (preferred over the raw values above) -------- #
+variable "db_password_secret_arn" {
+  description = "Secrets Manager ARN for the DB password. Non-empty = inject via ECS `secrets`; empty = plain env var fallback."
+  type        = string
+  default     = ""
+}
+variable "anthropic_api_key_secret_arn" {
+  description = "Secrets Manager ARN for the Anthropic API key. Empty = env var fallback (when key set)."
+  type        = string
+  default     = ""
+}
+variable "gemini_api_key_secret_arn" {
+  description = "Secrets Manager ARN for the Gemini API key. Empty = env var fallback (when key set)."
+  type        = string
+  default     = ""
 }
 
 variable "log_retention_days" {

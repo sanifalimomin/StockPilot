@@ -20,7 +20,10 @@ import type {
   Warehouse,
 } from './types';
 
-const BASE = '/api/v1';
+// Hosted builds (S3 website) bake in the absolute API origin at build time;
+// in dev it's unset, so requests stay relative and the Vite proxy forwards
+// them to VITE_API_TARGET (see vite.config.ts).
+const BASE = `${import.meta.env.VITE_API_BASE_URL ?? ''}/api/v1`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
@@ -87,7 +90,7 @@ interface RawAlert {
   resolved: boolean;
 }
 interface RawForecast { sku: string; method: string; points: { date: string; qty: number }[] }
-interface RawReportDescriptor { reportId: string; location: string; sizeBytes: number }
+interface RawReportDescriptor { reportId: string; filename?: string; location: string; sizeBytes: number; downloadUrl?: string | null }
 interface RawPurchaseOrder {
   id: number;
   supplierId: number;
@@ -177,9 +180,11 @@ const toForecast = (f: RawForecast): Forecast => ({
 
 const toReport = (r: RawReportDescriptor): ValuationReport => ({
   reportId: r.reportId,
+  filename: r.filename,
   location: r.location,
   generatedAt: '', // backend descriptor carries no timestamp
   totalValue: 0, // nor a precomputed total
+  downloadUrl: r.downloadUrl ?? undefined,
 });
 
 const toPurchaseOrder = (po: RawPurchaseOrder, productById: Map<string, RawProduct>): PurchaseOrder => {
@@ -353,6 +358,12 @@ export const httpClient: ApiClient = {
 
   createValuationReport: () =>
     request<CreateReportResponse>('/reports/valuation', { method: 'POST' }),
+  createLowStockReport: () =>
+    request<CreateReportResponse>('/reports/low-stock', { method: 'POST' }),
+  createMovementsReport: () =>
+    request<CreateReportResponse>('/reports/movements', { method: 'POST' }),
+  createDailyReports: () =>
+    request<CreateReportResponse[]>('/reports/daily', { method: 'POST' }),
   listReports: async () => (await request<RawReportDescriptor[]>('/reports')).map(toReport),
 
   forecast: async (sku, days = 30) =>

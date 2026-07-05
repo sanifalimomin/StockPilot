@@ -75,8 +75,15 @@ ims:
   reports:
     local-dir: ${REPORTS_DIR:./reports}
   forecast:
-    provider: ${FORECAST_PROVIDER:ewma}   # ewma | bedrock
+    # ewma    — statistical, free, no key (default)
+    # gemini  — Google AI Studio, FREE tier key (GEMINI_API_KEY)
+    # claude  — Anthropic API, prepaid credits (ANTHROPIC_API_KEY)
+    # bedrock — AWS-native, blocked in the Learner Lab
+    provider: ${FORECAST_PROVIDER:ewma}
     bedrock-model-id: ${BEDROCK_MODEL_ID:anthropic.claude-3-haiku-20240307-v1:0}
+    # Set CLAUDE_MODEL=claude-haiku-4-5 for the cheapest per-call option.
+    claude-model: ${CLAUDE_MODEL:claude-opus-4-8}
+    gemini-model: ${GEMINI_MODEL:gemini-2.5-flash}
   reorder:
     cron: ${REORDER_CRON:0 0 * * * *}
 

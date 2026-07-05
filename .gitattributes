@@ -1,0 +1,6 @@
+# Keep shell scripts LF so they run under Git Bash / Linux regardless of
+# core.autocrlf settings on Windows checkouts.
+*.sh text eol=lf
+gradlew text eol=lf
+gradle-wrapper.properties text eol=lf
+Dockerfile text eol=lf

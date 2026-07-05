@@ -155,6 +155,108 @@ resource "aws_s3_bucket_lifecycle_configuration" "reports" {
   }
 }
 
+# ---- S3 static website hosting for the React frontend ---------------------- #
+# The demo UI is served as a public S3 website over HTTP, matching the
+# HTTP-only ALB (no ACM cert in the lab). PRODUCTION: CloudFront + ACM in
+# front of both the site and the API for end-to-end HTTPS.
+resource "aws_s3_bucket" "frontend" {
+  bucket = "${local.name_prefix}-frontend-${data.aws_caller_identity.current.account_id}"
+  tags   = local.common_tags
+}
+
+resource "aws_s3_bucket_website_configuration" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
+
+  index_document {
+    suffix = "index.html"
+  }
+  # SPA fallback: unknown paths resolve to the app shell (client-side routing).
+  error_document {
+    key = "index.html"
+  }
+}
+
+# Website hosting requires public object reads; scope the exception to this
+# bucket only (the reports bucket stays fully blocked).
+resource "aws_s3_bucket_public_access_block" "frontend" {
+  bucket                  = aws_s3_bucket.frontend.id
+  block_public_acls       = true
+  ignore_public_acls      = true
+  block_public_policy     = false
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_policy" "frontend" {
+  bucket = aws_s3_bucket.frontend.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "PublicReadWebsite"
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = "s3:GetObject"
+        Resource  = "${aws_s3_bucket.frontend.arn}/*"
+      }
+    ]
+  })
+
+  depends_on = [aws_s3_bucket_public_access_block.frontend]
+}
+
+locals {
+  frontend_origin = "http://${aws_s3_bucket_website_configuration.frontend.website_endpoint}"
+}
+
+# ---- Secrets Manager -------------------------------------------------------- #
+# Application secrets live in Secrets Manager and are injected into containers
+# via the ECS task-definition `secrets` block (valueFrom), so they never appear
+# in plaintext in task definitions or the console. recovery_window = 0 allows
+# clean re-creates in the short-lived lab. Gated by use_secrets_manager in case
+# a lab SCP denies the service (falls back to plain env vars).
+resource "aws_secretsmanager_secret" "db_password" {
+  count                   = var.use_secrets_manager ? 1 : 0
+  name                    = "${local.name_prefix}-db-password"
+  description             = "RDS master password for the IMS application"
+  recovery_window_in_days = 0
+  tags                    = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "db_password" {
+  count         = var.use_secrets_manager ? 1 : 0
+  secret_id     = aws_secretsmanager_secret.db_password[0].id
+  secret_string = var.db_password
+}
+
+resource "aws_secretsmanager_secret" "anthropic_api_key" {
+  count                   = var.use_secrets_manager && var.anthropic_api_key != "" ? 1 : 0
+  name                    = "${local.name_prefix}-anthropic-api-key"
+  description             = "Anthropic API key for the Claude forecast provider"
+  recovery_window_in_days = 0
+  tags                    = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "anthropic_api_key" {
+  count         = var.use_secrets_manager && var.anthropic_api_key != "" ? 1 : 0
+  secret_id     = aws_secretsmanager_secret.anthropic_api_key[0].id
+  secret_string = var.anthropic_api_key
+}
+
+resource "aws_secretsmanager_secret" "gemini_api_key" {
+  count                   = var.use_secrets_manager && var.gemini_api_key != "" ? 1 : 0
+  name                    = "${local.name_prefix}-gemini-api-key"
+  description             = "Google AI Studio key for the Gemini forecast provider"
+  recovery_window_in_days = 0
+  tags                    = local.common_tags
+}
+
+resource "aws_secretsmanager_secret_version" "gemini_api_key" {
+  count         = var.use_secrets_manager && var.gemini_api_key != "" ? 1 : 0
+  secret_id     = aws_secretsmanager_secret.gemini_api_key[0].id
+  secret_string = var.gemini_api_key
+}
+
 # ---- ECS cluster + API service + worker service --------------------------- #
 module "ecs" {
   source = "./modules/ecs"
@@ -186,6 +288,10 @@ module "ecs" {
   worker_memory        = var.worker_memory
   worker_desired_count = var.worker_desired_count
 
+  # Nightly reorder scan: EventBridge cron -> one-shot Fargate task.
+  reorder_schedule_expression = var.reorder_schedule
+  events_role_arn             = data.aws_iam_role.lab.arn
+
   # App configuration wired from the other modules' outputs.
   db_endpoint    = module.rds.address
   db_port        = module.rds.port
@@ -198,6 +304,22 @@ module "ecs" {
   sqs_queue_url  = module.messaging.queue_url
   sns_topic_arn  = module.messaging.topic_arn
   reports_bucket = aws_s3_bucket.reports.bucket
+
+  # Allow the hosted frontend (S3 website) plus the local dev server.
+  cors_origins = "http://localhost:5173,${local.frontend_origin}"
+
+  # AI forecast (Bedrock is blocked in the Learner Lab): Gemini when its key is
+  # supplied (free tier), else Claude when its key is supplied (prepaid), else
+  # the free statistical EWMA provider.
+  forecast_provider = var.gemini_api_key != "" ? "gemini" : (var.anthropic_api_key != "" ? "claude" : "ewma")
+  anthropic_api_key = var.anthropic_api_key
+  gemini_api_key    = var.gemini_api_key
+
+  # Secrets Manager injection (ECS `secrets` block). Empty ARNs = fall back to
+  # plain env vars (only when use_secrets_manager = false).
+  db_password_secret_arn       = var.use_secrets_manager ? aws_secretsmanager_secret.db_password[0].arn : ""
+  anthropic_api_key_secret_arn = var.use_secrets_manager && var.anthropic_api_key != "" ? aws_secretsmanager_secret.anthropic_api_key[0].arn : ""
+  gemini_api_key_secret_arn    = var.use_secrets_manager && var.gemini_api_key != "" ? aws_secretsmanager_secret.gemini_api_key[0].arn : ""
 
   tags = local.common_tags
 }

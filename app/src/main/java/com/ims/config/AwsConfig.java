@@ -8,6 +8,7 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 
@@ -64,6 +65,14 @@ public class AwsConfig {
     @Bean
     public S3Client s3Client() {
         return S3Client.builder()
+                .region(region())
+                .credentialsProvider(DefaultCredentialsProvider.create())
+                .build();
+    }
+
+    @Bean
+    public S3Presigner s3Presigner() {
+        return S3Presigner.builder()
                 .region(region())
                 .credentialsProvider(DefaultCredentialsProvider.create())
                 .build();

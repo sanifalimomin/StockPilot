@@ -8,9 +8,9 @@ import {
   Bell,
   TrendingUp,
   FileBarChart,
-  Warehouse,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { Logo } from './Logo';
 
 const nav = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -27,13 +27,11 @@ export function Layout() {
   return (
     <div className="flex min-h-screen">
       <aside className="fixed inset-y-0 left-0 flex w-60 flex-col border-r border-slate-200 bg-white">
-        <div className="flex items-center gap-2 px-5 py-5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-600 text-white">
-            <Warehouse className="h-5 w-5" />
-          </div>
+        <div className="flex items-center gap-2.5 px-5 py-5">
+          <Logo className="h-9 w-9 shrink-0" />
           <div>
-            <p className="text-sm font-bold text-slate-900">IMS</p>
-            <p className="text-xs text-slate-400">Inventory Cloud</p>
+            <p className="text-sm font-bold tracking-tight text-slate-900">StockPilot</p>
+            <p className="text-xs text-slate-400">Inventory, on autopilot</p>
           </div>
         </div>
         <nav className="flex-1 space-y-1 px-3">
@@ -67,7 +65,7 @@ export function Layout() {
       <div className="flex flex-1 flex-col pl-60">
         <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-slate-200 bg-white/80 px-6 backdrop-blur">
           <h1 className="text-sm font-semibold text-slate-700">
-            Cloud-Native Inventory Management System
+            StockPilot — Cloud-Native Inventory Management
           </h1>
           <span className="text-xs text-slate-400">CSCI 5411 · Demo</span>
         </header>

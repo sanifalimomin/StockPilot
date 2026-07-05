@@ -54,6 +54,10 @@ export interface ApiClient {
   listAlerts(resolved?: boolean): Promise<Alert[]>;
 
   createValuationReport(): Promise<CreateReportResponse>;
+  createLowStockReport(): Promise<CreateReportResponse>;
+  createMovementsReport(): Promise<CreateReportResponse>;
+  /** Generate the full daily set: valuation + low-stock + movement audit. */
+  createDailyReports(): Promise<CreateReportResponse[]>;
   listReports(): Promise<ValuationReport[]>;
 
   forecast(sku: string, days?: number): Promise<Forecast>;
