@@ -76,17 +76,6 @@ jobs:
       - name: Build
         run: npm run build
 
-  # ---------------------------------------------------------------------------
-  # 3. Build the ARM64/Graviton image and push to ECR.
-  #    Runs only on push to main, gated on green tests + frontend build.
-  #
-  #    AUTH NOTE: We authenticate with AWS Academy Learner Lab *session
-  #    credentials* (access key + secret + session token), stored as GitHub
-  #    secrets and refreshed each lab session (~4h expiry). In production the
-  #    correct approach is GitHub OIDC federation (no long-lived secrets), but
-  #    that requires creating an IAM OIDC provider + roles, which the Learner
-  #    Lab forbids.
-  # ---------------------------------------------------------------------------
   build-and-push:
     name: Build & push image to ECR
     runs-on: ubuntu-latest
