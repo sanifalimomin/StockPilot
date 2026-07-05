@@ -30,15 +30,15 @@ jobs:
       run:
         working-directory: infra
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Verify confirmation input
         run: |
           if [ "${{ inputs.confirm }}" != "destroy" ]; then
             echo "::error::Confirmation failed - you must type 'destroy' exactly."
             exit 1
           fi
-
-      - name: Checkout
-        uses: actions/checkout@v4
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3
