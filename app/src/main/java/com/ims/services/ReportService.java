@@ -29,15 +29,6 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-/**
- * Generates the three operational CSV reports and stores them via the
- * ReportStore port (S3 in prod, filesystem locally):
- *   1. valuation.csv      — on-hand value per SKU/warehouse + grand total
- *   2. low-stock.csv      — items at/below reorder point with suggested order
- *   3. movements-24h.csv  — audit of all stock movements in the last 24 hours
- * All three run nightly from the EventBridge one-shot task (SchedulerRunner)
- * and on demand from the API.
- */
 @Service
 public class ReportService {
 
@@ -65,7 +56,6 @@ public class ReportService {
         this.store = store;
     }
 
-    /** Generate all three daily reports; used by the nightly scheduled task. */
     public List<Map<String, String>> generateDailyReports() {
         List<Map<String, String>> results = new ArrayList<>();
         results.add(generateValuation());
@@ -75,7 +65,6 @@ public class ReportService {
         return results;
     }
 
-    /** Inventory valuation: on-hand value (unit cost x qty) per SKU/warehouse. */
     @Transactional(readOnly = true)
     public Map<String, String> generateValuation() {
         Map<Long, Product> products = byId(productRepo.findAll(), Product::getId);
@@ -104,7 +93,6 @@ public class ReportService {
         return storeReport("valuation.csv", csv.toString());
     }
 
-    /** Low stock: items at/below reorder point, with suggested order qty + supplier. */
     @Transactional(readOnly = true)
     public Map<String, String> generateLowStock() {
         Map<Long, Product> products = byId(productRepo.findAll(), Product::getId);
@@ -132,7 +120,6 @@ public class ReportService {
         return storeReport("low-stock.csv", csv.toString());
     }
 
-    /** Movement audit: every stock movement recorded in the last 24 hours. */
     public Map<String, String> generateMovements() {
         Instant cutoff = Instant.now().minus(Duration.ofHours(24));
 

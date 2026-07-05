@@ -6,9 +6,6 @@ import lombok.Setter;
 
 import java.time.Instant;
 
-/**
- * Append-only ledger record. Stored in DynamoDB (prod) or in-memory (local).
- */
 @Getter
 @Setter
 @NoArgsConstructor

@@ -5,7 +5,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-/** No-op notifier for local profile / when SNS disabled. */
 @Component
 @ConditionalOnProperty(name = "ims.aws.sns.enabled", havingValue = "false")
 public class LoggingNotifier implements Notifier {

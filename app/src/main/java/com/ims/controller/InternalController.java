@@ -7,9 +7,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
-/**
- * Internal operations endpoint (manually trigger the reorder scan for demos).
- */
 @RestController
 @RequestMapping("/api/v1/internal")
 public class InternalController {

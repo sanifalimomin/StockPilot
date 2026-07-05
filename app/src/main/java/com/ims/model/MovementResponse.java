@@ -1,6 +1,5 @@
 package com.ims.model;
 
-
 import java.time.Instant;
 
 public record MovementResponse(

@@ -9,7 +9,6 @@ public enum PurchaseOrderStatus {
     RECEIVED,
     CANCELLED;
 
-    /** Allowed forward transitions for the PO lifecycle. */
     public Set<PurchaseOrderStatus> allowedNext() {
         return switch (this) {
             case DRAFT -> EnumSet.of(ORDERED, CANCELLED);

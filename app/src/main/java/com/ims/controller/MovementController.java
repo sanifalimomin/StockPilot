@@ -46,7 +46,6 @@ public class MovementController {
             return ResponseEntity.status(HttpStatus.CREATED).body(body);
         }
 
-        // Asynchronous (SQS): acknowledge acceptance
         MovementResponse body = new MovementResponse(null, req.sku(), req.warehouseId(), req.type(),
                 req.qty(), req.fromWarehouseId(), req.toWarehouseId(), Instant.now(),
                 req.idempotencyKey(), false);

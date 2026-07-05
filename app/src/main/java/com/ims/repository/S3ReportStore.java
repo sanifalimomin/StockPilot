@@ -15,22 +15,12 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Uploads reports to S3 for prod. Downloads go through short-lived presigned
- * GET URLs so the bucket stays fully private (public access block on) and no
- * AWS credentials are ever needed by the browser.
- */
 @Component
 @ConditionalOnProperty(name = "ims.aws.enabled", havingValue = "true", matchIfMissing = true)
 public class S3ReportStore implements ReportStore {
 
     private static final String PREFIX = "reports/";
 
-    /**
-     * Security vs convenience trade-off: long enough to click a link from the
-     * UI, short enough that a leaked URL goes stale quickly. Note the URL also
-     * dies when the signing session credentials expire, whichever comes first.
-     */
     private static final Duration URL_TTL = Duration.ofMinutes(15);
 
     private final S3Client s3;
@@ -70,7 +60,6 @@ public class S3ReportStore implements ReportStore {
         return result;
     }
 
-    /** Presigning is a local signature computation — no network call, cheap per object. */
     private String presign(String key) {
         var request = GetObjectPresignRequest.builder()
                 .signatureDuration(URL_TTL)

@@ -24,7 +24,6 @@ import java.util.Objects;
 @Transactional
 public class PurchaseOrderService {
 
-    /** Default warehouse used when receiving stock (first warehouse / configurable). */
     private final PurchaseOrderRepository poRepo;
     private final ProductRepository productRepo;
     private final InventoryLevelRepository inventoryRepo;
@@ -85,7 +84,6 @@ public class PurchaseOrderService {
         return poRepo.save(po);
     }
 
-    /** On RECEIVED, increment inventory for each line at the first available warehouse. */
     private void receiveStock(PurchaseOrder po) {
         Long defaultWarehouseId = inventoryRepo.findAll().stream()
                 .map(InventoryLevel::getWarehouseId)

@@ -13,10 +13,6 @@ import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
 import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
 
-/**
- * Bedrock-backed forecast (prod). Guarded: if Bedrock is unavailable or errors,
- * falls back to the EWMA statistical service so the API never fails.
- */
 @Service
 @Primary
 @ConditionalOnProperty(name = "ims.forecast.provider", havingValue = "bedrock")
@@ -39,7 +35,7 @@ public class BedrockForecastService implements ForecastService {
     @Override
     public ForecastResult forecast(String sku, int days) {
         try {
-            // Build a compact prompt from recent demand; Bedrock refines the EWMA baseline.
+
             ForecastResult baseline = fallback.forecast(sku, days);
             String prompt = "You are a demand forecasting assistant. Given the statistical baseline "
                     + "daily demand for SKU " + sku + ", respond only with a confirmation token. Baseline points: "
@@ -54,7 +50,6 @@ public class BedrockForecastService implements ForecastService {
                     .body(SdkBytes.fromUtf8String(body))
                     .build());
 
-            // Bedrock reachable: return baseline labelled as bedrock-assisted.
             return new ForecastResult(sku, "BEDROCK(" + modelId + ")+EWMA", baseline.points());
         } catch (Exception e) {
             log.warn("Bedrock forecast unavailable, falling back to EWMA: {}", e.getMessage());

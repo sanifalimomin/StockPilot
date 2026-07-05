@@ -18,7 +18,6 @@ import type {
   Warehouse,
 } from './types';
 
-
 export interface ApiClient {
   health(): Promise<HealthStatus>;
 
@@ -56,7 +55,7 @@ export interface ApiClient {
   createValuationReport(): Promise<CreateReportResponse>;
   createLowStockReport(): Promise<CreateReportResponse>;
   createMovementsReport(): Promise<CreateReportResponse>;
-  /** Generate the full daily set: valuation + low-stock + movement audit. */
+
   createDailyReports(): Promise<CreateReportResponse[]>;
   listReports(): Promise<ValuationReport[]>;
 

@@ -15,9 +15,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     boolean existsBySku(String sku);
 
-    // CAST(:q AS string) gives PostgreSQL a typed parameter; without it a null
-    // :q is bound as an untyped value (bytea) and LOWER(...) fails at runtime
-    // with "function lower(bytea) does not exist" on the unfiltered list call.
     @Query("""
             SELECT p FROM Product p
             WHERE (:categoryId IS NULL OR p.categoryId = :categoryId)

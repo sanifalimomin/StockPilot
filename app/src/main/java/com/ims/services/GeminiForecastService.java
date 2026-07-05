@@ -26,19 +26,6 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
-/**
- * Google Gemini-backed demand forecast (ims.forecast.provider=gemini).
- * Attractive for the Learner Lab because Google AI Studio issues FREE API
- * keys with a free usage tier — no billing account needed, unlike Bedrock
- * (blocked in the lab) or the Claude API (prepaid credits).
- *
- * Calls the public REST endpoint (generativelanguage.googleapis.com) with
- * Java's built-in HTTP client — plain HTTPS out through the NAT, no SDK.
- * Same contract as the other providers: recent daily OUTBOUND demand goes to
- * the model, which returns a per-day forecast as a JSON array. On ANY failure
- * (no GEMINI_API_KEY, rate limit, unparseable reply) it degrades to the
- * statistical EWMA baseline, so /forecast never fails.
- */
 @Service
 @Primary
 @ConditionalOnProperty(name = "ims.forecast.provider", havingValue = "gemini")
@@ -54,7 +41,7 @@ public class GeminiForecastService implements ForecastService {
     private final EwmaForecastService fallback;
     private final ObjectMapper mapper;
     private final String model;
-    private final String apiKey; // empty when not configured -> EWMA only
+    private final String apiKey;
     private final HttpClient http;
 
     public GeminiForecastService(StockMovementLedger ledger, ObjectMapper mapper, ImsProperties props) {
@@ -79,7 +66,7 @@ public class GeminiForecastService implements ForecastService {
         try {
             Map<LocalDate, Integer> daily = dailyOutbound(sku);
             if (daily.isEmpty()) {
-                return fallback.forecast(sku, horizon); // no demand history to reason over
+                return fallback.forecast(sku, horizon);
             }
 
             String history = daily.entrySet().stream()
@@ -133,7 +120,6 @@ public class GeminiForecastService implements ForecastService {
         }
     }
 
-    /** Concatenate the text parts of the first candidate. */
     private String extractText(JsonNode root) {
         StringBuilder sb = new StringBuilder();
         for (JsonNode part : root.path("candidates").path(0).path("content").path("parts")) {
@@ -146,7 +132,6 @@ public class GeminiForecastService implements ForecastService {
         return text;
     }
 
-    /** Aggregate outbound qty per day (oldest first), capped to the recent window. */
     private Map<LocalDate, Integer> dailyOutbound(String sku) {
         Map<LocalDate, Integer> daily = new TreeMap<>();
         LocalDate cutoff = LocalDate.now(ZoneOffset.UTC).minusDays(MAX_HISTORY_DAYS);
@@ -159,7 +144,6 @@ public class GeminiForecastService implements ForecastService {
         return daily;
     }
 
-    /** Parse the model reply into exactly {@code horizon} values (defensive against fences/prose). */
     private double[] parseForecast(String text, int horizon) throws Exception {
         int start = text.indexOf('[');
         int end = text.lastIndexOf(']');
@@ -170,7 +154,7 @@ public class GeminiForecastService implements ForecastService {
         if (parsed.length == 0) {
             throw new IllegalStateException("model returned an empty forecast");
         }
-        // Tolerate a wrong-length reply: truncate or pad with the last value.
+
         double[] values = new double[horizon];
         for (int i = 0; i < horizon; i++) {
             values[i] = parsed[Math.min(i, parsed.length - 1)];

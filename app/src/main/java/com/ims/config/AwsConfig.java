@@ -14,10 +14,6 @@ import software.amazon.awssdk.services.sqs.SqsClient;
 
 import java.net.URI;
 
-/**
- * Real AWS SDK v2 clients. Only created when ims.aws.enabled=true (prod/default).
- * In the local profile these beans are absent and in-memory ports take over.
- */
 @Configuration
 @ConditionalOnProperty(name = "ims.aws.enabled", havingValue = "true", matchIfMissing = true)
 public class AwsConfig {

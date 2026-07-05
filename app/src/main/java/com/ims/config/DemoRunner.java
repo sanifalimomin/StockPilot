@@ -7,10 +7,6 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-/**
- * Local-demo helper: logs startup info and runs an initial reorder scan so the
- * /alerts endpoint has data immediately after boot.
- */
 @Component
 @Profile("local")
 public class DemoRunner implements CommandLineRunner {

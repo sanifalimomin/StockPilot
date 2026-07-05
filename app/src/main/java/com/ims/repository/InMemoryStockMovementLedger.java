@@ -13,9 +13,6 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/**
- * In-memory ledger for the local profile (no AWS).
- */
 @Component
 @ConditionalOnProperty(name = "ims.aws.enabled", havingValue = "false")
 public class InMemoryStockMovementLedger implements StockMovementLedger {

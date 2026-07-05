@@ -14,10 +14,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
-/**
- * Statistical fallback forecast using exponentially weighted moving average (EWMA)
- * of historical daily OUTBOUND demand. Default provider and used for local.
- */
 @Service
 @ConditionalOnProperty(name = "ims.forecast.provider", havingValue = "ewma", matchIfMissing = true)
 public class EwmaForecastService implements ForecastService {
@@ -36,7 +32,6 @@ public class EwmaForecastService implements ForecastService {
         int horizon = days <= 0 ? 30 : days;
         List<StockMovement> history = ledger.outboundHistory(sku, HISTORY_LIMIT);
 
-        // Aggregate outbound qty per day
         Map<LocalDate, Integer> dailyDemand = new TreeMap<>();
         for (StockMovement m : history) {
             LocalDate d = m.getTimestamp().atZone(ZoneOffset.UTC).toLocalDate();
@@ -47,7 +42,7 @@ public class EwmaForecastService implements ForecastService {
         if (dailyDemand.isEmpty()) {
             ewma = 0.0;
         } else {
-            // history is newest-first; compute EWMA oldest -> newest
+
             List<Integer> series = new ArrayList<>(dailyDemand.values());
             ewma = series.get(0);
             for (int i = 1; i < series.size(); i++) {

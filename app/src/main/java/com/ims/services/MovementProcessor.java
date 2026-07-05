@@ -21,10 +21,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.UUID;
 
-/**
- * Core movement processing: idempotent, transactional inventory mutation,
- * ledger append, and reorder evaluation. Invoked inline (local) or by the SQS worker (prod).
- */
 @Service
 public class MovementProcessor {
 
@@ -45,15 +41,10 @@ public class MovementProcessor {
         this.reorderService = reorderService;
     }
 
-    /**
-     * Process a movement event. Idempotent on idempotencyKey. Returns the recorded movement
-     * (or the previously recorded one when a duplicate is detected).
-     * Evicts the consolidated-stock cache for the affected SKU.
-     */
     @Transactional
     @CacheEvict(cacheNames = "consolidatedStock", key = "#event.sku()")
     public StockMovement process(MovementEvent event) {
-        // Idempotency check
+
         if (event.idempotencyKey() != null) {
             var existing = ledger.findByIdempotencyKey(event.idempotencyKey());
             if (existing.isPresent()) {
@@ -88,7 +79,6 @@ public class MovementProcessor {
         movement.setIdempotencyKey(event.idempotencyKey());
         ledger.append(movement);
 
-        // Reorder evaluation on affected warehouse(s)
         evaluateAffected(product.getId(), event);
 
         log.info("Processed movement {} type={} sku={} qty={}",
@@ -134,7 +124,6 @@ public class MovementProcessor {
         inventoryRepo.save(level);
     }
 
-    /** ADJUSTMENT sets the on-hand to an absolute value (qty). */
     private void applyAdjustment(Long productId, Long warehouseId, int qty) {
         InventoryLevel level = levelOrCreate(productId, warehouseId);
         level.setQuantityOnHand(qty);

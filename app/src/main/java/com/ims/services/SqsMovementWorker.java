@@ -19,9 +19,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * SQS long-poll worker. Active only when role is WORKER or ALL and SQS is enabled.
- */
 @Component
 @ConditionalOnProperty(name = "ims.aws.sqs.enabled", havingValue = "true", matchIfMissing = true)
 public class SqsMovementWorker {
@@ -90,7 +87,7 @@ public class SqsMovementWorker {
                     .receiptHandle(msg.receiptHandle())
                     .build());
         } catch (Exception e) {
-            // leave message on queue for redelivery / DLQ
+
             log.error("Failed to process movement message {}", msg.messageId(), e);
         }
     }

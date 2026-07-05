@@ -19,7 +19,6 @@ public class ReportController {
         this.service = service;
     }
 
-    /** Generate the full daily set (valuation + low-stock + movement audit). */
     @PostMapping("/daily")
     @ResponseStatus(HttpStatus.CREATED)
     public List<Map<String, String>> daily() {

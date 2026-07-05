@@ -19,11 +19,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-/**
- * DynamoDB-backed ledger for prod. Table is keyed on movementId (PK).
- * idempotencyKey dedupe uses a scan-with-filter for simplicity; in a production
- * deployment this would be a GSI on idempotencyKey.
- */
 @Component
 @ConditionalOnProperty(name = "ims.aws.enabled", havingValue = "true", matchIfMissing = true)
 public class DynamoDbStockMovementLedger implements StockMovementLedger {

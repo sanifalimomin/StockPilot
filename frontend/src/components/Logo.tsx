@@ -1,8 +1,5 @@
-/**
- * StockPilot mark: an isometric stock cube with light-faceted faces on an
- * indigo-to-sky gradient tile. The same artwork lives in public/favicon.svg —
- * keep them in sync if the mark changes.
- */
+
+
 export function Logo({ className = 'h-9 w-9' }: { className?: string }) {
   return (
     <svg viewBox="0 0 48 48" className={className} role="img" aria-label="StockPilot logo">
@@ -13,11 +10,11 @@ export function Logo({ className = 'h-9 w-9' }: { className?: string }) {
         </linearGradient>
       </defs>
       <rect width="48" height="48" rx="11" fill="url(#sp-gradient)" />
-      {/* isometric cube: top / left / right faces at varying opacity */}
+      {}
       <polygon points="24,10.5 35.5,17 24,23.5 12.5,17" fill="#fff" opacity="0.95" />
       <polygon points="12.5,17 24,23.5 24,37 12.5,30.5" fill="#fff" opacity="0.5" />
       <polygon points="35.5,17 24,23.5 24,37 35.5,30.5" fill="#fff" opacity="0.72" />
-      {/* upward trend tick — the "pilot" */}
+      {}
       <path
         d="M17 42.5 l4.5 -3.5 3 2 5.5 -4.5"
         fill="none"

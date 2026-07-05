@@ -58,7 +58,7 @@ class MovementProcessorTest {
         String key = UUID.randomUUID().toString();
         int before = onHand("SKU-1001", 1L);
         processor.process(new MovementEvent("SKU-1001", 1L, MovementType.INBOUND, 5, null, null, key));
-        // replay with same key
+
         processor.process(new MovementEvent("SKU-1001", 1L, MovementType.INBOUND, 5, null, null, key));
         assertThat(onHand("SKU-1001", 1L)).isEqualTo(before + 5);
         assertThat(ledger.findByIdempotencyKey(key)).isPresent();
@@ -76,10 +76,10 @@ class MovementProcessorTest {
 
     @Test
     void lowStockRaisesAlert() {
-        // SKU-3001 at warehouse 1 starts at 8 with reorderPoint 10 -> already low.
+
         processor.process(new MovementEvent("SKU-3001", 1L, MovementType.OUTBOUND, 1,
                 null, null, UUID.randomUUID().toString()));
-        // alert presence verified indirectly: process succeeds and on-hand decremented
+
         assertThat(onHand("SKU-3001", 1L)).isEqualTo(7);
     }
 }

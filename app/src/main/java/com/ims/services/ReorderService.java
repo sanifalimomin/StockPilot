@@ -35,7 +35,6 @@ public class ReorderService {
         this.notifier = notifier;
     }
 
-    /** Check a single inventory level and raise an alert if at/below reorder point. */
     @Transactional
     public void evaluate(InventoryLevel level) {
         Product product = productRepo.findById(level.getProductId()).orElse(null);
@@ -45,7 +44,7 @@ public class ReorderService {
         if (level.getQuantityOnHand() <= product.getReorderPoint()) {
             raiseAlert(product, level);
         } else {
-            // recovered: resolve any open alert for this product/warehouse
+
             alertRepo.findFirstByProductIdAndWarehouseIdAndResolvedFalse(
                     level.getProductId(), level.getWarehouseId())
                     .ifPresent(a -> {
@@ -60,7 +59,7 @@ public class ReorderService {
                 .findFirstByProductIdAndWarehouseIdAndResolvedFalse(level.getProductId(), level.getWarehouseId())
                 .isPresent();
         if (exists) {
-            return; // already alerted; avoid duplicates
+            return;
         }
         LowStockAlert alert = new LowStockAlert();
         alert.setProductId(product.getId());
@@ -80,7 +79,6 @@ public class ReorderService {
         notifier.notifyLowStock(subject, message);
     }
 
-    /** Full scan across all inventory rows; used by the scheduled task. */
     @Transactional
     public int scanAll() {
         List<InventoryLevel> levels = inventoryRepo.findAll();

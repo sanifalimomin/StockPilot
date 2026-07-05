@@ -92,7 +92,7 @@ export function PurchaseOrdersPage() {
     const product = products.data?.find((p) => p.id === productId);
     updateLine(idx, {
       productId,
-      // Pre-fill unit cost from the product, but keep it editable.
+
       unitCost: product ? String(product.unitCost) : '',
     });
   };
@@ -151,7 +151,7 @@ export function PurchaseOrdersPage() {
         error={pos.error}
       />
 
-      {/* Create PO */}
+      {}
       <Modal
         open={createOpen}
         title="New Purchase Order"
@@ -247,7 +247,7 @@ export function PurchaseOrdersPage() {
         </div>
       </Modal>
 
-      {/* View PO */}
+      {}
       <Modal
         open={!!selectedId}
         title={po ? po.reference : 'Purchase Order'}

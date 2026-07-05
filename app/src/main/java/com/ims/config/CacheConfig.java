@@ -8,12 +8,6 @@ import org.springframework.cache.interceptor.CacheErrorHandler;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-/**
- * Makes the Redis cache non-fatal: if a cache get/put/evict fails (e.g. Redis is
- * briefly unreachable), log it and fall through to the underlying method instead
- * of failing the request. The @Cacheable consolidated-stock endpoint therefore
- * always degrades to a direct database read rather than erroring.
- */
 @Configuration
 public class CacheConfig implements CachingConfigurer {
 

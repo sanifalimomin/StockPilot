@@ -10,7 +10,6 @@ import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.SendMessageRequest;
 
-/** Publishes movement events to SQS for the worker role (prod). */
 @Component
 @ConditionalOnProperty(name = "ims.aws.sqs.enabled", havingValue = "true", matchIfMissing = true)
 public class SqsMovementPublisher implements MovementPublisher {
@@ -33,7 +32,7 @@ public class SqsMovementPublisher implements MovementPublisher {
                     .queueUrl(queueUrl)
                     .messageBody(body);
             sqs.sendMessage(req.build());
-            return false; // asynchronous
+            return false;
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Failed to serialize movement event", e);
         }

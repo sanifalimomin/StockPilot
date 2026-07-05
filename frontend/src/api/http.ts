@@ -20,9 +20,6 @@ import type {
   Warehouse,
 } from './types';
 
-// Hosted builds (S3 website) bake in the absolute API origin at build time;
-// in dev it's unset, so requests stay relative and the Vite proxy forwards
-// them to VITE_API_TARGET (see vite.config.ts).
 const BASE = `${import.meta.env.VITE_API_BASE_URL ?? ''}/api/v1`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -122,7 +119,7 @@ const toProduct = (p: RawProduct): Product => ({
   categoryId: String(p.categoryId),
   supplierId: String(p.supplierId),
   unitCost: p.unitCost ?? 0,
-  unitPrice: p.unitCost ?? 0, // backend has no sell price; show cost as a placeholder
+  unitPrice: p.unitCost ?? 0,
   reorderPoint: p.reorderPoint,
   reorderQty: p.reorderQty,
 });
@@ -141,7 +138,6 @@ const toInventoryLevel = (r: RawInventoryRow): InventoryLevel => ({
   available: Math.max(0, r.quantityOnHand - r.quantityReserved),
 });
 
-// MovementResponse doesn't echo the movement type, so infer it for display.
 function inferMovementType(m: RawMovement): MovementType {
   if (m.fromWarehouseId != null && m.toWarehouseId != null) return 'TRANSFER';
   if (m.qty < 0) return 'OUTBOUND';
@@ -182,8 +178,8 @@ const toReport = (r: RawReportDescriptor): ValuationReport => ({
   reportId: r.reportId,
   filename: r.filename,
   location: r.location,
-  generatedAt: '', // backend descriptor carries no timestamp
-  totalValue: 0, // nor a precomputed total
+  generatedAt: '',
+  totalValue: 0,
   downloadUrl: r.downloadUrl ?? undefined,
 });
 
@@ -270,7 +266,7 @@ export const httpClient: ApiClient = {
     toWarehouse(
       await request<RawWarehouse>('/warehouses', {
         method: 'POST',
-        // Backend requires a non-blank `code`; the UI doesn't collect one, so derive it.
+
         body: JSON.stringify({
           code: deriveWarehouseCode(input.name),
           name: input.name,
@@ -281,8 +277,7 @@ export const httpClient: ApiClient = {
 
   listInventory: async (params) =>
     (await request<RawInventoryRow[]>(`/inventory${qs({ ...params })}`)).map(toInventoryLevel),
-  // Backend exposes a single-SKU consolidated endpoint; build the list view
-  // client-side from raw inventory rows joined to products.
+
   consolidatedInventory: async (sku) => {
     const [rows, products] = await Promise.all([
       request<RawInventoryRow[]>(`/inventory${qs({ sku })}`),

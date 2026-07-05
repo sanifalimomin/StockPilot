@@ -6,7 +6,6 @@ import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sns.model.PublishRequest;
 
-/** SNS notifier for prod. */
 @Component
 @ConditionalOnProperty(name = "ims.aws.sns.enabled", havingValue = "true", matchIfMissing = true)
 public class SnsNotifier implements Notifier {

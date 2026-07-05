@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Stream;
 
-/** Writes reports to ./reports for the local profile. */
 @Component
 @ConditionalOnProperty(name = "ims.aws.enabled", havingValue = "false")
 public class LocalReportStore implements ReportStore {
@@ -30,7 +29,7 @@ public class LocalReportStore implements ReportStore {
             Files.createDirectories(dir);
             Path file = dir.resolve(reportId + "-" + filename);
             Files.write(file, content);
-            // No presigned URL concept on the local filesystem.
+
             return new ReportDescriptor(reportId, filename, file.toAbsolutePath().toString(), content.length, null);
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to write report", e);

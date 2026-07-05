@@ -24,16 +24,6 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
-/**
- * Claude API-backed demand forecast (ims.forecast.provider=claude). Used
- * instead of Bedrock because the AWS Academy Learner Lab does not grant
- * Bedrock model access; the Claude API is plain HTTPS out through the NAT.
- *
- * The recent daily OUTBOUND demand series is sent to the model, which returns
- * a per-day forecast as JSON that is parsed into the result. On ANY failure
- * (no ANTHROPIC_API_KEY, network error, unparseable reply) the service
- * degrades to the statistical EWMA baseline, so /forecast never fails.
- */
 @Service
 @Primary
 @ConditionalOnProperty(name = "ims.forecast.provider", havingValue = "claude")
@@ -47,7 +37,7 @@ public class ClaudeForecastService implements ForecastService {
     private final EwmaForecastService fallback;
     private final ObjectMapper mapper;
     private final String model;
-    private final AnthropicClient client; // null when no API key is configured
+    private final AnthropicClient client;
 
     public ClaudeForecastService(StockMovementLedger ledger, ObjectMapper mapper, ImsProperties props) {
         this.ledger = ledger;
@@ -57,7 +47,7 @@ public class ClaudeForecastService implements ForecastService {
 
         AnthropicClient c = null;
         try {
-            c = AnthropicOkHttpClient.fromEnv(); // reads ANTHROPIC_API_KEY
+            c = AnthropicOkHttpClient.fromEnv();
         } catch (Exception e) {
             log.warn("Claude forecast provider selected but no usable ANTHROPIC_API_KEY; "
                     + "falling back to EWMA for all forecasts: {}", e.getMessage());
@@ -74,7 +64,7 @@ public class ClaudeForecastService implements ForecastService {
         try {
             Map<LocalDate, Integer> daily = dailyOutbound(sku);
             if (daily.isEmpty()) {
-                return fallback.forecast(sku, horizon); // no demand history to reason over
+                return fallback.forecast(sku, horizon);
             }
 
             String history = daily.entrySet().stream()
@@ -118,7 +108,6 @@ public class ClaudeForecastService implements ForecastService {
         }
     }
 
-    /** Aggregate outbound qty per day (oldest first), capped to the recent window. */
     private Map<LocalDate, Integer> dailyOutbound(String sku) {
         Map<LocalDate, Integer> daily = new TreeMap<>();
         LocalDate cutoff = LocalDate.now(ZoneOffset.UTC).minusDays(MAX_HISTORY_DAYS);
@@ -131,7 +120,6 @@ public class ClaudeForecastService implements ForecastService {
         return daily;
     }
 
-    /** Parse the model reply into exactly {@code horizon} values (defensive against fences/prose). */
     private double[] parseForecast(String text, int horizon) throws Exception {
         int start = text.indexOf('[');
         int end = text.lastIndexOf(']');
@@ -142,7 +130,7 @@ public class ClaudeForecastService implements ForecastService {
         if (parsed.length == 0) {
             throw new IllegalStateException("model returned an empty forecast");
         }
-        // Tolerate a wrong-length reply: truncate or pad with the last value.
+
         double[] values = new double[horizon];
         for (int i = 0; i < horizon; i++) {
             values[i] = parsed[Math.min(i, parsed.length - 1)];

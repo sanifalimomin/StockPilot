@@ -116,12 +116,12 @@ export interface Alert {
 
 export interface ValuationReport {
   reportId: string;
-  /** Logical file name identifying the report type, e.g. "valuation.csv". */
+
   filename?: string;
   location: string;
   generatedAt: string;
   totalValue: number;
-  /** Time-limited presigned S3 GET URL; absent when running locally. */
+
   downloadUrl?: string;
 }
 

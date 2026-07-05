@@ -9,12 +9,6 @@ import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-/**
- * One-shot scheduler entrypoint for the EventBridge-triggered ECS task.
- * When role is SCHEDULER the app boots, runs a single reorder scan, and exits
- * so the RunTask invocation terminates (unlike the long-lived API/worker
- * services). Role ALL keeps the in-process cron instead (see ReorderScheduler).
- */
 @Component
 public class SchedulerRunner {
 
@@ -46,7 +40,7 @@ public class SchedulerRunner {
             log.info("One-shot reorder scan complete; {} open low-stock alert(s)", openAlerts);
         } catch (Exception e) {
             log.error("One-shot reorder scan failed", e);
-            exitCode = 1; // non-zero so the ECS task reports failure
+            exitCode = 1;
         }
         try {
             reportService.generateDailyReports()
@@ -56,7 +50,7 @@ public class SchedulerRunner {
             exitCode = 1;
         }
         final int code = exitCode;
-        // Shut down off the event thread so context close doesn't deadlock startup.
+
         Thread exiter = new Thread(() -> System.exit(SpringApplication.exit(context, () -> code)),
                 "scheduler-exit");
         exiter.setDaemon(false);

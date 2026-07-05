@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# =============================================================================
-# deploy.sh — one-shot deployment of the entire IMS stack to an AWS Academy
-# Learner Lab account, from scratch.
+# deploy.sh — one-shot deployment of the IMS stack to an AWS Academy Learner Lab.
 #
 #   ./scripts/deploy.sh                         # interactive: paste lab creds
 #   ./scripts/deploy.sh --alert-email me@x.com  # subscribe SNS alerts
@@ -10,32 +8,13 @@
 #   ./scripts/deploy.sh --skip-frontend         # infra + image only
 #   ./scripts/deploy.sh --destroy               # tear everything down
 #
-# Credentials: either export AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY /
-# AWS_SESSION_TOKEN beforehand, or just run the script and paste the block
-# from AWS Academy -> AWS Details -> AWS CLI when prompted.
-#
-# What it does (in order):
-#   1. Collect + verify Learner Lab session credentials (us-east-1)
-#   2. Bootstrap the Terraform remote-state backend (S3 bucket + DynamoDB lock)
-#   3. Generate infra/terraform.tfvars (random DB password) if missing
-#   4. terraform apply the full platform (VPC, ALB, ECS, RDS, Redis, DynamoDB,
-#      SQS/SNS, EventBridge, ECR, S3 buckets, CloudWatch)
-#   5. Build the ARM64 Spring Boot image and push it to ECR
-#   6. Force new deployments of the api + worker ECS services
-#   7. Build the React frontend against the live ALB and sync it to S3
-#   8. Poll the health endpoint until the API answers
-#
-# Requirements: bash (Git Bash works), aws CLI v2, terraform >= 1.6,
-# docker (with buildx), node 20+ / npm, curl.
-# =============================================================================
+# Needs: bash, aws CLI v2, terraform >= 1.6, docker (buildx), node 20+, curl.
 set -euo pipefail
 
-# ---- locate repo root (script lives in scripts/) ---------------------------
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 INFRA="$ROOT/infra"
 REGION="us-east-1"
 
-# ---- options ----------------------------------------------------------------
 ALERT_EMAIL=""
 ENABLE_WAF="false"
 SKIP_BUILD="false"
@@ -51,7 +30,7 @@ while [[ $# -gt 0 ]]; do
     --skip-frontend) SKIP_FRONTEND="true"; shift ;;
     --destroy)       DESTROY="true"; shift ;;
     --yes|-y)        ASSUME_YES="true"; shift ;;
-    -h|--help)       grep '^#' "$0" | head -30; exit 0 ;;
+    -h|--help)       grep '^#' "$0" | head -11; exit 0 ;;
     *) echo "Unknown option: $1 (see --help)"; exit 1 ;;
   esac
 done
@@ -60,12 +39,8 @@ log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
 die()  { printf '\033[1;31m[error]\033[0m %s\n' "$*" >&2; exit 1; }
 
-# =============================================================================
-# 1. Credentials
-# =============================================================================
 if [[ -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" || -z "${AWS_SESSION_TOKEN:-}" ]]; then
   echo "Paste the credentials block from AWS Academy (AWS Details -> AWS CLI -> Show)."
-  echo "It looks like:  [default] / aws_access_key_id=... / aws_secret_access_key=... / aws_session_token=..."
   echo "Finish with an empty line:"
   BLOCK=""
   while IFS= read -r line; do
@@ -82,7 +57,6 @@ fi
 export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
 export AWS_REGION="$REGION" AWS_DEFAULT_REGION="$REGION"
 
-# ---- preflight ---------------------------------------------------------------
 for tool in aws terraform curl; do
   command -v "$tool" >/dev/null || die "'$tool' is required but not on PATH."
 done
@@ -108,7 +82,6 @@ tf_init_main() {
     -backend-config="dynamodb_table=$LOCK_TABLE" >/dev/null
 }
 
-# Empty an S3 bucket, including all object versions and delete markers.
 purge_bucket() {
   local bucket="$1"
   aws s3api head-bucket --bucket "$bucket" 2>/dev/null || return 0
@@ -116,8 +89,6 @@ purge_bucket() {
   aws s3 rm "s3://$bucket" --recursive --quiet || true
   while :; do
     local versions
-    # Small pages + inline JSON: avoids file:// arguments, which Git Bash on
-    # Windows mangles before they reach the native aws.exe.
     versions="$(aws s3api list-object-versions --bucket "$bucket" --max-keys 200 \
       --query '[Versions[].{Key:Key,VersionId:VersionId},DeleteMarkers[].{Key:Key,VersionId:VersionId}][]' \
       --output json 2>/dev/null || echo '[]')"
@@ -127,9 +98,6 @@ purge_bucket() {
   done
 }
 
-# =============================================================================
-# Destroy mode
-# =============================================================================
 if [[ "$DESTROY" == "true" ]]; then
   if [[ "$ASSUME_YES" != "true" ]]; then
     read -r -p "This will DESTROY the entire IMS stack in account $ACCOUNT_ID. Type 'destroy' to continue: " ans
@@ -158,9 +126,6 @@ if [[ "$DESTROY" == "true" ]]; then
   exit 0
 fi
 
-# =============================================================================
-# 2. Bootstrap remote state (S3 + DynamoDB lock)
-# =============================================================================
 log "Checking Terraform state backend"
 BUCKET_OK=false; TABLE_OK=false
 aws s3api head-bucket --bucket "$STATE_BUCKET" 2>/dev/null && BUCKET_OK=true
@@ -169,8 +134,7 @@ aws dynamodb describe-table --table-name "$LOCK_TABLE" >/dev/null 2>&1 && TABLE_
 if [[ "$BUCKET_OK" == "true" && "$TABLE_OK" == "true" ]]; then
   echo "Backend already exists ($STATE_BUCKET) - skipping bootstrap."
 else
-  # A leftover local state from a PREVIOUS Academy account would make Terraform
-  # try to update resources that no longer exist - move it aside first.
+  # stale local state from a previous Academy account must be moved aside
   BOOT_STATE="$INFRA/bootstrap/terraform.tfstate"
   if [[ -f "$BOOT_STATE" ]] && ! grep -q "$STATE_BUCKET" "$BOOT_STATE"; then
     warn "bootstrap state is from another account - backing it up"
@@ -182,9 +146,6 @@ else
     -var "state_bucket_name=$STATE_BUCKET" -var "lock_table_name=$LOCK_TABLE"
 fi
 
-# =============================================================================
-# 3. terraform.tfvars (generate once; random DB password)
-# =============================================================================
 TFVARS="$INFRA/terraform.tfvars"
 if [[ ! -f "$TFVARS" ]]; then
   log "Generating $TFVARS"
@@ -216,9 +177,7 @@ worker_desired_count = 1
 
 alert_email = "$ALERT_EMAIL"
 
-# Optional AI forecast (Bedrock is blocked in the Learner Lab). Recommended:
-# a FREE Google AI Studio key (aistudio.google.com). Gemini wins over Claude;
-# both empty = free statistical EWMA forecast.
+# Optional AI forecast keys (Gemini wins; both empty = free EWMA forecast).
 gemini_api_key    = ""
 anthropic_api_key = ""
 
@@ -231,9 +190,6 @@ else
   [[ -n "$ALERT_EMAIL" ]] && warn "--alert-email ignored: tfvars already exists; edit it manually."
 fi
 
-# =============================================================================
-# 4. Provision the platform
-# =============================================================================
 log "terraform init (S3 backend: $STATE_BUCKET)"
 tf_init_main
 log "terraform apply (first run takes 15-25 min: RDS + ElastiCache are slow)"
@@ -247,9 +203,6 @@ FRONTEND_URL="$(tfout frontend_website_url)"
 CLUSTER="$(tfout ecs_cluster_name)"
 PREFIX="${CLUSTER%-cluster}"
 
-# =============================================================================
-# 5-6. Build + push the ARM64 image, roll the ECS services
-# =============================================================================
 if [[ "$SKIP_BUILD" != "true" ]]; then
   log "Logging in to ECR"
   aws ecr get-login-password --region "$REGION" \
@@ -265,15 +218,11 @@ else
   warn "--skip-build: not building/pushing the image."
 fi
 
-# =============================================================================
-# 7. Frontend build + S3 sync
-# =============================================================================
 if [[ "$SKIP_FRONTEND" != "true" ]]; then
   log "Building the frontend against http://$ALB_DNS"
   (
     cd "$ROOT/frontend"
-    # Reinstall only when needed: npm ci wipes node_modules, which fails with
-    # EPERM on Windows if a Vite dev server (esbuild.exe) is still running.
+    # npm ci wipes node_modules and fails with EPERM if a Vite dev server runs
     if [[ -f node_modules/.package-lock.json && node_modules/.package-lock.json -nt package-lock.json ]]; then
       echo "Dependencies up to date - skipping npm ci."
     else
@@ -292,9 +241,6 @@ else
   warn "--skip-frontend: not building/deploying the frontend."
 fi
 
-# =============================================================================
-# 8. Wait for the API to answer
-# =============================================================================
 if [[ "$SKIP_BUILD" != "true" ]]; then
   log "Waiting for the API to become healthy (image pull + Spring Boot startup)"
   HEALTH="http://$ALB_DNS/api/v1/health"
@@ -308,9 +254,6 @@ if [[ "$SKIP_BUILD" != "true" ]]; then
   done
 fi
 
-# =============================================================================
-# Summary
-# =============================================================================
 log "Deployment complete"
 cat <<EOF
   Dashboard     CloudWatch -> Dashboards -> $PREFIX-dashboard
