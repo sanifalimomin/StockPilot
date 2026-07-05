@@ -1,0 +1,110 @@
+name: Infra Destroy (manual)
+
+# Manually triggered from the Actions tab. Tears down the ENTIRE stack
+# (buckets are emptied and ECR images purged first so Terraform can delete
+# them). The bootstrap state bucket and lock table are left in place.
+#
+# Required secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'destroy' to confirm tearing down the entire stack"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  destroy:
+    name: terraform destroy
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Verify confirmation input
+        run: |
+          if [ "${{ inputs.confirm }}" != "destroy" ]; then
+            echo "::error::Confirmation failed - you must type 'destroy' exactly."
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials (Learner Lab session creds)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
+
+      - name: Resolve account and state backend
+        id: backend
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          BUCKET="ims-tf-state-$ACCOUNT_ID"
+          aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null \
+            || { echo "::error::State bucket $BUCKET not found - nothing to destroy."; exit 1; }
+          echo "bucket=$BUCKET"         >> "$GITHUB_OUTPUT"
+          echo "account=$ACCOUNT_ID"    >> "$GITHUB_OUTPUT"
+
+      - name: Terraform init
+        run: |
+          terraform init -reconfigure -input=false \
+            -backend-config="bucket=${{ steps.backend.outputs.bucket }}" \
+            -backend-config="region=${{ vars.AWS_REGION || env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=ims-tf-locks"
+
+      - name: Empty app buckets (all versions) and purge ECR images
+        run: |
+          ACCOUNT_ID="${{ steps.backend.outputs.account }}"
+          purge_bucket() {
+            local bucket="$1"
+            aws s3api head-bucket --bucket "$bucket" 2>/dev/null || return 0
+            echo "Emptying s3://$bucket ..."
+            aws s3 rm "s3://$bucket" --recursive --quiet || true
+            while :; do
+              versions="$(aws s3api list-object-versions --bucket "$bucket" --max-keys 200 \
+                --query '[Versions[].{Key:Key,VersionId:VersionId},DeleteMarkers[].{Key:Key,VersionId:VersionId}][]' \
+                --output json 2>/dev/null || echo '[]')"
+              [ -z "$versions" ] || [ "$versions" = "[]" ] || [ "$versions" = "null" ] && break
+              aws s3api delete-objects --bucket "$bucket" \
+                --delete "{\"Objects\":$versions,\"Quiet\":true}" >/dev/null
+            done
+          }
+          purge_bucket "$(terraform output -raw reports_bucket 2>/dev/null || echo "ims-dev-reports-$ACCOUNT_ID")"
+          purge_bucket "$(terraform output -raw frontend_bucket 2>/dev/null || echo "ims-dev-frontend-$ACCOUNT_ID")"
+
+          IDS="$(aws ecr list-images --repository-name ims-dev-app --query 'imageIds[*]' --output json 2>/dev/null || echo '[]')"
+          if [ "$IDS" != "[]" ] && [ -n "$IDS" ] && [ "$IDS" != "null" ]; then
+            aws ecr batch-delete-image --repository-name ims-dev-app --image-ids "$IDS" >/dev/null || true
+          fi
+
+      - name: Terraform destroy
+        env:
+          # Values are irrelevant for destroy but required variables must be set.
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD || 'unused-for-destroy' }}
+        run: terraform destroy -auto-approve -input=false
+
+      - name: Write summary
+        run: |
+          {
+            echo "## Infra destroyed"
+            echo "Main stack removed. The bootstrap state bucket (${{ steps.backend.outputs.bucket }}) and lock table remain."
+          } >> "$GITHUB_STEP_SUMMARY"

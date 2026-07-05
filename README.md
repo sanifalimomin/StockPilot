@@ -105,7 +105,9 @@ InventoryManagementSystem/
 │   └── main.tf  variables.tf  outputs.tf  backend.tf
 ├── .github/workflows/
 │   ├── ci-cd.yml             # test -> build ARM64 image -> push ECR -> deploy ECS (api + worker) -> sync frontend to S3
-│   └── terraform.yml         # fmt -check + validate on infra/ PRs
+│   ├── terraform.yml         # fmt -check + validate on infra/ PRs
+│   ├── infra-apply.yml       # MANUAL trigger: bootstrap state + terraform apply (needs DB_PASSWORD secret)
+│   └── infra-destroy.yml     # MANUAL trigger: empty buckets, purge ECR, terraform destroy (type 'destroy' to confirm)
 └── README.md                 # this file
 ```
 
@@ -166,6 +168,7 @@ with fresh credentials after the lab session expires.
 ./scripts/deploy.sh                          # prompts for the AWS CLI creds block
 ./scripts/deploy.sh --alert-email you@x.com  # also subscribe SNS low-stock alerts
 ./scripts/deploy.sh --destroy                # full teardown (protect lab budget)
+./scripts/deploy.sh --redeploy               # destroy + rebuild everything from scratch
 ```
 
 Needs: aws CLI v2, Terraform 1.6+, Docker (buildx), Node 20+. On Windows run it

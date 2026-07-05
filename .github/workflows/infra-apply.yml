@@ -1,0 +1,104 @@
+name: Infra Apply (manual)
+
+# Manually triggered from the Actions tab. Terraform apply is not run on merge
+# because Learner Lab credentials expire (~4h): refresh the AWS_* repo secrets,
+# then trigger this workflow.
+#
+# Required secrets: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN,
+# DB_PASSWORD (RDS master password; keep it consistent across runs).
+# Optional secrets: GEMINI_API_KEY, ANTHROPIC_API_KEY. Optional variable: ALERT_EMAIL.
+on:
+  workflow_dispatch:
+    inputs:
+      enable_waf:
+        description: "Provision AWS WAF (lab SCP may deny it)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Never run two Terraform operations on the same state at once.
+concurrency:
+  group: infra
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-1
+
+jobs:
+  apply:
+    name: terraform apply
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Configure AWS credentials (Learner Lab session creds)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
+
+      - name: Check required DB_PASSWORD secret
+        run: |
+          if [ -z "${{ secrets.DB_PASSWORD }}" ]; then
+            echo "::error::Repo secret DB_PASSWORD is not set (RDS master password)."
+            exit 1
+          fi
+
+      - name: Resolve account and state backend
+        id: backend
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "bucket=ims-tf-state-$ACCOUNT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Bootstrap remote state (only if missing)
+        run: |
+          BUCKET="${{ steps.backend.outputs.bucket }}"
+          if aws s3api head-bucket --bucket "$BUCKET" 2>/dev/null \
+             && aws dynamodb describe-table --table-name ims-tf-locks >/dev/null 2>&1; then
+            echo "Backend already exists ($BUCKET) - skipping bootstrap."
+          else
+            terraform -chdir=bootstrap init -input=false
+            terraform -chdir=bootstrap apply -auto-approve -input=false \
+              -var "state_bucket_name=$BUCKET" -var "lock_table_name=ims-tf-locks"
+          fi
+
+      - name: Terraform init
+        run: |
+          terraform init -reconfigure -input=false \
+            -backend-config="bucket=${{ steps.backend.outputs.bucket }}" \
+            -backend-config="region=${{ vars.AWS_REGION || env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=ims-tf-locks"
+
+      - name: Terraform apply
+        env:
+          TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+          TF_VAR_gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
+          TF_VAR_anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+        run: |
+          terraform apply -auto-approve -input=false \
+            -var "enable_waf=${{ inputs.enable_waf }}"
+
+      - name: Write outputs to the run summary
+        run: |
+          {
+            echo "## Infra apply complete"
+            echo '```'
+            terraform output
+            echo '```'
+            echo "Next: run the CI/CD pipeline (push to main or re-run it) to build/push the image and deploy the app + frontend."
+          } >> "$GITHUB_STEP_SUMMARY"

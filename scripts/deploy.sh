@@ -7,6 +7,7 @@
 #   ./scripts/deploy.sh --skip-build            # infra + frontend only
 #   ./scripts/deploy.sh --skip-frontend         # infra + image only
 #   ./scripts/deploy.sh --destroy               # tear everything down
+#   ./scripts/deploy.sh --redeploy              # destroy, then rebuild from scratch
 #
 # Needs: bash, aws CLI v2, terraform >= 1.6, docker (buildx), node 20+, curl.
 set -euo pipefail
@@ -20,6 +21,7 @@ ENABLE_WAF="false"
 SKIP_BUILD="false"
 SKIP_FRONTEND="false"
 DESTROY="false"
+REDEPLOY="false"
 ASSUME_YES="false"
 
 while [[ $# -gt 0 ]]; do
@@ -29,11 +31,15 @@ while [[ $# -gt 0 ]]; do
     --skip-build)    SKIP_BUILD="true"; shift ;;
     --skip-frontend) SKIP_FRONTEND="true"; shift ;;
     --destroy)       DESTROY="true"; shift ;;
+    --redeploy)      DESTROY="true"; REDEPLOY="true"; shift ;;
     --yes|-y)        ASSUME_YES="true"; shift ;;
-    -h|--help)       grep '^#' "$0" | head -11; exit 0 ;;
+    -h|--help)       grep '^#' "$0" | head -12; exit 0 ;;
     *) echo "Unknown option: $1 (see --help)"; exit 1 ;;
   esac
 done
+
+[[ "$REDEPLOY" == "true" && "$SKIP_BUILD" == "true" ]] \
+  && { echo "[warn] --redeploy with --skip-build leaves the fresh ECR repo empty; services will not start."; }
 
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m[warn]\033[0m %s\n' "$*"; }
@@ -99,31 +105,40 @@ purge_bucket() {
 }
 
 if [[ "$DESTROY" == "true" ]]; then
-  if [[ "$ASSUME_YES" != "true" ]]; then
-    read -r -p "This will DESTROY the entire IMS stack in account $ACCOUNT_ID. Type 'destroy' to continue: " ans
-    [[ "$ans" == "destroy" ]] || die "Aborted."
+  if aws s3api head-bucket --bucket "$STATE_BUCKET" 2>/dev/null; then
+    if [[ "$ASSUME_YES" != "true" ]]; then
+      [[ "$REDEPLOY" == "true" ]] && ACTION="DESTROY and RE-CREATE" || ACTION="DESTROY"
+      read -r -p "This will $ACTION the entire IMS stack in account $ACCOUNT_ID. Type 'destroy' to continue: " ans
+      [[ "$ans" == "destroy" ]] || die "Aborted."
+    fi
+    tf_init_main
+
+    log "Emptying app buckets so Terraform can delete them"
+    purge_bucket "$(terraform -chdir="$INFRA" output -raw reports_bucket 2>/dev/null || echo "ims-dev-reports-$ACCOUNT_ID")"
+    purge_bucket "$(terraform -chdir="$INFRA" output -raw frontend_bucket 2>/dev/null || echo "ims-dev-frontend-$ACCOUNT_ID")"
+
+    log "Purging ECR images"
+    ECR_REPO="ims-dev-app"
+    IDS="$(aws ecr list-images --repository-name "$ECR_REPO" --query 'imageIds[*]' --output json 2>/dev/null || echo '[]')"
+    if [[ "$IDS" != "[]" && -n "$IDS" && "$IDS" != "null" ]]; then
+      aws ecr batch-delete-image --repository-name "$ECR_REPO" --image-ids "$IDS" >/dev/null || true
+    fi
+
+    log "terraform destroy (10-20 min: RDS/Redis teardown is slow)"
+    terraform -chdir="$INFRA" destroy -auto-approve
+
+    if [[ "$REDEPLOY" != "true" ]]; then
+      echo
+      echo "Main stack destroyed. The bootstrap state bucket ($STATE_BUCKET) and lock"
+      echo "table are left in place; the Learner Lab wipes them when the lab resets."
+      exit 0
+    fi
+    log "Destroy complete - re-creating the whole stack from scratch"
+  else
+    [[ "$REDEPLOY" == "true" ]] \
+      || die "State bucket $STATE_BUCKET not found - nothing to destroy in this account."
+    warn "No existing stack in this account - proceeding straight to a fresh deployment."
   fi
-  aws s3api head-bucket --bucket "$STATE_BUCKET" 2>/dev/null \
-    || die "State bucket $STATE_BUCKET not found - nothing to destroy in this account."
-  tf_init_main
-
-  log "Emptying app buckets so Terraform can delete them"
-  purge_bucket "$(terraform -chdir="$INFRA" output -raw reports_bucket 2>/dev/null || echo "ims-dev-reports-$ACCOUNT_ID")"
-  purge_bucket "$(terraform -chdir="$INFRA" output -raw frontend_bucket 2>/dev/null || echo "ims-dev-frontend-$ACCOUNT_ID")"
-
-  log "Purging ECR images"
-  ECR_REPO="ims-dev-app"
-  IDS="$(aws ecr list-images --repository-name "$ECR_REPO" --query 'imageIds[*]' --output json 2>/dev/null || echo '[]')"
-  if [[ "$IDS" != "[]" && -n "$IDS" && "$IDS" != "null" ]]; then
-    aws ecr batch-delete-image --repository-name "$ECR_REPO" --image-ids "$IDS" >/dev/null || true
-  fi
-
-  log "terraform destroy (10-20 min: RDS/Redis teardown is slow)"
-  terraform -chdir="$INFRA" destroy -auto-approve
-  echo
-  echo "Main stack destroyed. The bootstrap state bucket ($STATE_BUCKET) and lock"
-  echo "table are left in place; the Learner Lab wipes them when the lab resets."
-  exit 0
 fi
 
 log "Checking Terraform state backend"
