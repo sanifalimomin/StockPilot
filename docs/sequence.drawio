@@ -1,0 +1,148 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="Movement Sequence" id="ims-seq-1">
+    <mxGraphModel dx="1373" dy="923" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="1650" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;align=left;verticalAlign=top;fontSize=20;fontStyle=1;fontFamily=Helvetica;" value="StockPilot — Recording a Stock Movement (end-to-end write path)" vertex="1">
+          <mxGeometry height="28" width="900" x="40" y="14" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" parent="1" style="text;html=1;align=left;verticalAlign=top;fontSize=12;fontFamily=Helvetica;fontColor=#4a5568;" value="Sequence for asynchronous, idempotent, audited. Solid arrows = synchronous calls; dashed = returns / async delivery." vertex="1">
+          <mxGeometry height="20" width="1000" x="40" y="42" as="geometry" />
+        </mxCell>
+        <mxCell id="titleline" parent="1" style="line;strokeWidth=2;html=1;strokeColor=#FF9900;" value="" vertex="1">
+          <mxGeometry height="8" width="1480" x="40" y="66" as="geometry" />
+        </mxCell>
+        <mxCell id="ll-user" parent="1" style="shape=umlLifeline;participant=umlActor;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=40;fontFamily=Helvetica;fontSize=11;fontStyle=1;" value="Warehouse&#xa;Associate" vertex="1">
+          <mxGeometry height="730" width="80" x="70" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ll-alb" parent="1" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=40;fillColor=#EDE7F6;strokeColor=#8C4FFF;fontColor=#1a202c;fontFamily=Helvetica;fontSize=11;fontStyle=1;" value="AWS WAF + ALB" vertex="1">
+          <mxGeometry height="730" width="140" x="215" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ll-api" parent="1" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=40;fillColor=#FFF2E8;strokeColor=#ED7100;fontColor=#1a202c;fontFamily=Helvetica;fontSize=11;fontStyle=1;" value="ECS Fargate API&#xa;(Spring Boot)" vertex="1">
+          <mxGeometry height="730" width="140" x="395" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ll-sqs" parent="1" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=40;fillColor=#FCE4EC;strokeColor=#E7157B;fontColor=#1a202c;fontFamily=Helvetica;fontSize=11;fontStyle=1;" value="SQS movements&#xa;queue (+ DLQ)" vertex="1">
+          <mxGeometry height="730" width="140" x="595" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ll-worker" parent="1" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=40;fillColor=#FFF2E8;strokeColor=#ED7100;fontColor=#1a202c;fontFamily=Helvetica;fontSize=11;fontStyle=1;" value="ECS Fargate Worker&#xa;(Spot)" vertex="1">
+          <mxGeometry height="730" width="140" x="775" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ll-rds" parent="1" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=40;fillColor=#F5E6F7;strokeColor=#C925D1;fontColor=#1a202c;fontFamily=Helvetica;fontSize=11;fontStyle=1;" value="RDS PostgreSQL&#xa;(system of record)" vertex="1">
+          <mxGeometry height="730" width="140" x="975" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ll-ddb" parent="1" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=40;fillColor=#F5E6F7;strokeColor=#C925D1;fontColor=#1a202c;fontFamily=Helvetica;fontSize=11;fontStyle=1;" value="DynamoDB&#xa;movement ledger" vertex="1">
+          <mxGeometry height="730" width="140" x="1155" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="ll-sns" parent="1" style="shape=umlLifeline;perimeter=lifelinePerimeter;whiteSpace=wrap;html=1;container=0;collapsible=0;recursiveResize=0;outlineConnect=0;size=40;fillColor=#FCE4EC;strokeColor=#E7157B;fontColor=#1a202c;fontFamily=Helvetica;fontSize=11;fontStyle=1;" value="SNS low-stock&#xa;topic" vertex="1">
+          <mxGeometry height="730" width="140" x="1335" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="m1" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="1. POST /api/v1/movements&#xa;{OUTBOUND, qty 30, idempotencyKey &quot;ship-4711&quot;}">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="110" y="175" as="sourcePoint" />
+            <mxPoint x="285" y="175" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m2" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="2. forward :8080">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="285" y="210" as="sourcePoint" />
+            <mxPoint x="465" y="210" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m3" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=middle;align=left;spacingLeft=6;rounded=1;" value="3. validate (type, qty &gt; 0)">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="545" y="250" />
+            </Array>
+            <mxPoint x="465" y="238" as="sourcePoint" />
+            <mxPoint x="465" y="262" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m4" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="4. SendMessage(movement event)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="465" y="292" as="sourcePoint" />
+            <mxPoint x="665" y="292" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m5" edge="1" parent="1" style="html=1;endArrow=open;dashed=1;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="5. 202 Accepted (asynchronous)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="465" y="327" as="sourcePoint" />
+            <mxPoint x="110" y="327" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m6" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="6. ReceiveMessage (long-poll, 20 s wait)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="845" y="405" as="sourcePoint" />
+            <mxPoint x="665" y="405" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m7" edge="1" parent="1" style="html=1;endArrow=open;dashed=1;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="7. movement event">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="665" y="440" as="sourcePoint" />
+            <mxPoint x="845" y="440" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m8" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="8. findByIdempotencyKey(&quot;ship-4711&quot;)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="845" y="475" as="sourcePoint" />
+            <mxPoint x="1225" y="475" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m9" edge="1" parent="1" style="html=1;endArrow=open;dashed=1;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="9. not found → first delivery, proceed">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1225" y="510" as="sourcePoint" />
+            <mxPoint x="845" y="510" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m10" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="10. BEGIN · SELECT stock row (optimistic @Version)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="845" y="545" as="sourcePoint" />
+            <mxPoint x="1045" y="545" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m11" edge="1" parent="1" style="html=1;endArrow=open;dashed=1;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="11. on-hand = 120">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1045" y="578" as="sourcePoint" />
+            <mxPoint x="845" y="578" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m12" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="12. UPDATE on-hand 120 → 90 · COMMIT&#xa;(reject if result &lt; 0)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="845" y="618" as="sourcePoint" />
+            <mxPoint x="1045" y="618" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m13" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="13. PutItem: append movement (movementId, timestamp, qty)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="845" y="653" as="sourcePoint" />
+            <mxPoint x="1225" y="653" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m14" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="14. reorder check: on-hand ≤ reorder point? → raise alert">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="845" y="688" as="sourcePoint" />
+            <mxPoint x="1045" y="688" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m15" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="15. Publish &quot;Low stock: SKU-1001&quot; (only if alert raised)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="845" y="723" as="sourcePoint" />
+            <mxPoint x="1405" y="723" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m16" edge="1" parent="1" style="html=1;endArrow=open;dashed=1;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="16. email&#xa;subscribers">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="1405" y="758" as="sourcePoint" />
+            <mxPoint x="1530" y="758" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="m17" edge="1" parent="1" style="html=1;endArrow=block;fontSize=10;fontFamily=Helvetica;verticalAlign=bottom;" value="17. DeleteMessage (processing complete)">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="845" y="793" as="sourcePoint" />
+            <mxPoint x="665" y="793" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
